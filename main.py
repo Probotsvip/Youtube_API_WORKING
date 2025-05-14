@@ -255,7 +255,7 @@ def required_api_key(func):
             return jsonify({"error": "Invalid API key"}), 401
         
         # Check if API key is expired
-        if api_key.is_expired:
+        if api_key.is_expired():
             return jsonify({"error": "API key expired"}), 401
         
         # Check if daily limit exceeded
@@ -390,7 +390,7 @@ class YouTubeAPIService:
                     raise ValueError(f"No videos found for query: {url}")
             
             url = normalize_url(url)
-            add_jitter(0.2)  # Add a small delay
+            add_jitter(1)  # Add a small delay
             
             # Try with youtube-search-python first
             try:
@@ -507,7 +507,7 @@ class YouTubeAPIService:
                     raise ValueError(f"No videos found for query: {url}")
             
             url = normalize_url(url)
-            add_jitter(0.3)  # Add a small delay
+            add_jitter(1)  # Add a small delay
             
             # Generate a unique stream ID
             stream_id = str(uuid.uuid4())
@@ -668,14 +668,16 @@ class YouTubeAPIService:
             query_type = int(query_type) if str(query_type).isdigit() else 0
             
             a = VideosSearch(link, limit=query_type + 5)  # Get a few extra in case some fail
-            result = (await a.next()).get("result", [])
+            a_result = await a.next()
+            result = a_result.get("result", []) if a_result else []
             
             if not result or query_type >= len(result):
                 return "Unknown", "0:00", "", ""
             
             title = result[query_type]["title"]
             duration_min = result[query_type].get("duration", "0:00")
-            thumbnail = result[query_type].get("thumbnails", [{}])[0].get("url", "").split("?")[0]
+            thumbnails = result[query_type].get("thumbnails", [{}])
+            thumbnail = thumbnails[0].get("url", "").split("?")[0] if thumbnails else ""
             vidid = result[query_type]["id"]
             
             return title, duration_min, thumbnail, vidid

@@ -23,11 +23,9 @@ class ApiKey(db.Model):
     # Self-referential relationship
     created_keys = relationship("ApiKey", backref="creator", remote_side=[id])
     
-    @property
     def is_expired(self):
         return datetime.now() > self.valid_until
     
-    @property
     def remaining_requests(self):
         if datetime.now() > self.reset_at:
             return self.daily_limit
