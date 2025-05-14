@@ -313,28 +313,56 @@ class YouTubeAPIService:
         try:
             add_jitter(1)  # Add a small delay
             
-            results = VideosSearch(query, limit=limit)
-            result_dict = await results.next()
+            # Fix for AsyncClient.__init__() error with proxies
+            # Bypassing youtubesearchpython VideosSearch which causes proxies error
+            options = clean_ytdl_options()
+            options.update({
+                "quiet": True,
+                "no_warnings": True,
+                "extract_flat": True,
+                "default_search": "ytsearch",
+                "skip_download": True
+            })
             
-            if not result_dict or "result" not in result_dict:
-                return []
+            search_term = f"ytsearch{limit}:{query}"
             
-            videos = []
-            for result in result_dict["result"]:
-                video = {
-                    "id": result.get("id", ""),
-                    "title": result.get("title", "Unknown"),
-                    "duration": time_to_seconds(result.get("duration", "0:00")),
-                    "duration_text": result.get("duration", "0:00"),
-                    "views": result.get("viewCount", {}).get("text", "0").replace(" views", "").replace(",", ""),
-                    "publish_time": result.get("publishedTime", ""),
-                    "channel": result.get("channel", {}).get("name", ""),
-                    "thumbnail": result.get("thumbnails", [{}])[0].get("url", "").split("?")[0],
-                    "link": result.get("link", ""),
-                }
-                videos.append(video)
-            
-            return videos
+            with yt_dlp.YoutubeDL(options) as ydl:
+                search_results = ydl.extract_info(search_term, download=False)
+                
+                if not search_results or 'entries' not in search_results:
+                    return []
+                
+                videos = []
+                for entry in search_results['entries']:
+                    if not entry:
+                        continue
+                        
+                    video_id = entry.get('id', '')
+                    title = entry.get('title', 'Unknown')
+                    duration = entry.get('duration', 0)
+                    duration_text = str(datetime.timedelta(seconds=duration)) if duration else "0:00"
+                    if duration_text.startswith('0:'):
+                        duration_text = duration_text[2:]
+                    
+                    views = entry.get('view_count', 0)
+                    channel = entry.get('uploader', '')
+                    thumbnail = entry.get('thumbnail', '')
+                    link = f"https://www.youtube.com/watch?v={video_id}"
+                    
+                    video = {
+                        "id": video_id,
+                        "title": title,
+                        "duration": duration,
+                        "duration_text": duration_text,
+                        "views": views,
+                        "publish_time": entry.get('upload_date', ''),
+                        "channel": channel,
+                        "thumbnail": thumbnail,
+                        "link": link,
+                    }
+                    videos.append(video)
+                
+                return videos
         except Exception as e:
             logger.error(f"Error searching videos: {e}")
             return []
@@ -519,11 +547,6 @@ class YouTubeAPIService:
                 "skip_download": True,
             })
             
-            # Use a random proxy if available
-            proxy = get_random_proxy()
-            if proxy:
-                options["proxy"] = proxy
-            
             with yt_dlp.YoutubeDL(options) as ydl:
                 info = ydl.extract_info(url, download=False)
                 best_format = info.get("url", "")
@@ -563,11 +586,6 @@ class YouTubeAPIService:
                 "extract_flat": True,
                 "skip_download": True,
             })
-            
-            # Use a random proxy if available
-            proxy = get_random_proxy()
-            if proxy:
-                options["proxy"] = proxy
             
             with yt_dlp.YoutubeDL(options) as ydl:
                 info = ydl.extract_info(url, download=False)
@@ -621,10 +639,6 @@ class YouTubeAPIService:
             url = normalize_url(url)
             
             options = clean_ytdl_options()
-            # Use a random proxy if available
-            proxy = get_random_proxy()
-            if proxy:
-                options["proxy"] = proxy
                 
             with yt_dlp.YoutubeDL(options) as ydl:
                 info = ydl.extract_info(url, download=False)
@@ -768,11 +782,6 @@ class YouTubeAPIService:
             
             # Set output template
             options["outtmpl"] = output_path
-            
-            # Use a random proxy if available
-            proxy = get_random_proxy()
-            if proxy:
-                options["proxy"] = proxy
             
             # Download the file
             with yt_dlp.YoutubeDL(options) as ydl:
