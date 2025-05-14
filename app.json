@@ -1,0 +1,36 @@
+{
+  "name": "YouTube API Service",
+  "description": "A robust Flask API for YouTube content retrieval with advanced anti-bot protection and streaming capabilities.",
+  "repository": "https://github.com/yourusername/youtube-api-service",
+  "keywords": ["python", "flask", "youtube", "api", "streaming"],
+  "env": {
+    "SECRET_KEY": {
+      "description": "A secret key for verifying the integrity of signed cookies.",
+      "generator": "secret"
+    },
+    "DATABASE_URL": {
+      "description": "Database connection string (PostgreSQL recommended for production)",
+      "value": ""
+    },
+    "PROXY_LIST": {
+      "description": "Optional comma-separated list of proxies to use for requests to YouTube",
+      "required": false,
+      "value": ""
+    }
+  },
+  "buildpacks": [
+    {
+      "url": "heroku/python"
+    },
+    {
+      "url": "https://github.com/jonathanong/heroku-buildpack-ffmpeg-latest.git"
+    }
+  ],
+  "success_url": "/",
+  "formation": {
+    "web": {
+      "quantity": 1,
+      "size": "eco"
+    }
+  }
+}

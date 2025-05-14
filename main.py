@@ -2280,18 +2280,21 @@ def stream_media(stream_id):
 def get_metrics():
     """Get API usage metrics"""
     try:
+        from sqlalchemy import func
+        from sqlalchemy.sql import text
+        
         # Total requests
-        total_requests = ApiLog.query.count()
+        total_requests = db.session.query(func.count(ApiLog.id)).scalar() or 0
         
         # Today's requests
         today_start = datetime.datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
-        today_requests = ApiLog.query.filter(ApiLog.timestamp >= today_start).count()
+        today_requests = db.session.query(func.count(ApiLog.id)).filter(ApiLog.timestamp >= today_start).scalar() or 0
         
         # Active keys
-        active_keys = ApiKey.query.filter(ApiKey.valid_until >= datetime.datetime.now()).count()
+        active_keys = db.session.query(func.count(ApiKey.id)).filter(ApiKey.valid_until >= datetime.datetime.now()).scalar() or 0
         
         # Error rate
-        error_logs = ApiLog.query.filter(ApiLog.response_status >= 400).count()
+        error_logs = db.session.query(func.count(ApiLog.id)).filter(ApiLog.response_status >= 400).scalar() or 0
         error_rate = round((error_logs / total_requests) * 100, 2) if total_requests > 0 else 0
         
         # Daily requests for the past 7 days
@@ -2300,13 +2303,13 @@ def get_metrics():
             day = datetime.datetime.now() - datetime.timedelta(days=i)
             day_start = day.replace(hour=0, minute=0, second=0, microsecond=0)
             day_end = day.replace(hour=23, minute=59, second=59, microsecond=999999)
-            count = ApiLog.query.filter(ApiLog.timestamp.between(day_start, day_end)).count()
+            count = db.session.query(func.count(ApiLog.id)).filter(ApiLog.timestamp.between(day_start, day_end)).scalar() or 0
             daily_requests[day.strftime("%a")] = count
         
         # Key distribution
         key_distribution = {}
         for key in ApiKey.query.all():
-            count = ApiLog.query.filter(ApiLog.api_key_id == key.id).count()
+            count = db.session.query(func.count(ApiLog.id)).filter(ApiLog.api_key_id == key.id).scalar() or 0
             if count > 0:
                 key_distribution[key.name] = count
         
@@ -2430,8 +2433,10 @@ def recent_logs():
         limit = int(request.args.get("limit", 20))
         
         logs = []
-        for log in ApiLog.query.order_by(ApiLog.timestamp.desc()).limit(limit).all():
-            api_key = ApiKey.query.get(log.api_key_id)
+        recent_logs = db.session.query(ApiLog).order_by(ApiLog.timestamp.desc()).limit(limit).all()
+        
+        for log in recent_logs:
+            api_key = db.session.query(ApiKey).get(log.api_key_id)
             logs.append({
                 "id": log.id,
                 "api_key": api_key.key if api_key else "",
