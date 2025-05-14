@@ -12,7 +12,7 @@ import string
 import time
 import uuid
 from functools import wraps
-from typing import Dict, List, Optional, Union
+from typing import Dict, List, Optional, Union, Any
 from urllib.parse import parse_qs, urlparse
 
 import httpx
@@ -22,10 +22,8 @@ from flask_cors import CORS
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 from flask_sqlalchemy import SQLAlchemy
-from youtubesearchpython.__future__ import VideosSearch
-
-# Import models
-from models import db, init_db, ApiKey, ApiLog
+from sqlalchemy import Column, Integer, String, DateTime, Boolean, ForeignKey, Text, BigInteger
+from sqlalchemy.orm import relationship, DeclarativeBase
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -50,8 +48,14 @@ app = Flask(__name__)
 CORS(app)
 app.secret_key = os.environ.get("SESSION_SECRET", secrets.token_hex(16))
 
+# Database setup
+class Base(DeclarativeBase):
+    pass
+
+db = SQLAlchemy(model_class=Base)
+
 # Configure database
-app.config["SQLALCHEMY_DATABASE_URI"] = os.environ.get("DATABASE_URL")
+app.config["SQLALCHEMY_DATABASE_URI"] = os.environ.get("DATABASE_URL", "sqlite:///youtube_api.db")
 app.config["SQLALCHEMY_ENGINE_OPTIONS"] = {
     "pool_recycle": 300,
     "pool_pre_ping": True,
@@ -59,7 +63,47 @@ app.config["SQLALCHEMY_ENGINE_OPTIONS"] = {
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 
 # Initialize database
-init_db(app)
+db.init_app(app)
+
+# Define models for database tables
+class ApiKey(db.Model):
+    __tablename__ = 'api_keys'
+    
+    id = Column(Integer, primary_key=True)
+    key = Column(String(64), unique=True, nullable=False)
+    name = Column(String(100), nullable=False)
+    is_admin = Column(Boolean, default=False)
+    created_at = Column(DateTime, default=datetime.datetime.now)
+    valid_until = Column(DateTime, nullable=False)
+    daily_limit = Column(Integer, default=100)
+    reset_at = Column(DateTime, default=lambda: datetime.datetime.now() + datetime.timedelta(days=1))
+    count = Column(Integer, default=0)
+    created_by = Column(Integer, ForeignKey('api_keys.id'), nullable=True)
+
+    # Self-referential relationship
+    created_keys = relationship("ApiKey", backref="creator", remote_side=[id])
+    
+    def is_expired(self):
+        return datetime.datetime.now() > self.valid_until
+    
+    def remaining_requests(self):
+        if datetime.datetime.now() > self.reset_at:
+            return self.daily_limit
+        return self.daily_limit - self.count
+
+class ApiLog(db.Model):
+    __tablename__ = 'api_logs'
+    
+    id = Column(Integer, primary_key=True)
+    api_key_id = Column(Integer, ForeignKey('api_keys.id'), nullable=False)
+    endpoint = Column(String(255), nullable=False)
+    query = Column(Text, nullable=True)
+    ip_address = Column(String(45), nullable=True)
+    timestamp = Column(DateTime, default=datetime.datetime.now)
+    response_status = Column(Integer, default=200)
+    
+    # Relationship
+    api_key = relationship("ApiKey", backref="logs")
 
 # Initialize rate limiter
 limiter = Limiter(
@@ -93,6 +137,1469 @@ USER_AGENTS = [
 # Proxy rotation (if needed)
 PROXY_LIST = os.environ.get("PROXY_LIST", "").split(",") if os.environ.get("PROXY_LIST") else []
 
+# HTML templates
+INDEX_HTML = """<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>YouTube API Service</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <style>
+        :root {
+            --primary-color: #ff0000;
+            --secondary-color: #282828;
+            --accent-color: #4285F4;
+            --text-color: #ffffff;
+            --dark-bg: #121212;
+            --card-bg: #1e1e1e;
+        }
+        
+        body {
+            background-color: var(--dark-bg);
+            color: var(--text-color);
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            padding-top: 30px;
+            padding-bottom: 50px;
+            min-height: 100vh;
+            overflow-x: hidden;
+        }
+        
+        .header {
+            padding: 2.5rem 0;
+            text-align: center;
+            position: relative;
+            background: linear-gradient(135deg, var(--secondary-color) 0%, var(--dark-bg) 100%);
+            border-radius: 16px;
+            margin-bottom: 40px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+            overflow: hidden;
+        }
+        
+        .header::before {
+            content: '';
+            position: absolute;
+            top: -50%;
+            left: -50%;
+            width: 200%;
+            height: 200%;
+            background: radial-gradient(circle, rgba(255, 0, 0, 0.1) 0%, rgba(18, 18, 18, 0) 70%);
+            z-index: 0;
+            animation: pulse 15s infinite;
+        }
+        
+        @keyframes pulse {
+            0% { transform: scale(1); opacity: 0.3; }
+            50% { transform: scale(1.1); opacity: 0.1; }
+            100% { transform: scale(1); opacity: 0.3; }
+        }
+        
+        .logo {
+            font-size: 4rem;
+            color: var(--primary-color);
+            margin-bottom: 1rem;
+            filter: drop-shadow(0 0 15px rgba(255, 0, 0, 0.7));
+            position: relative;
+            z-index: 1;
+            animation: float 6s ease-in-out infinite;
+        }
+        
+        @keyframes float {
+            0% { transform: translateY(0px); }
+            50% { transform: translateY(-10px); }
+            100% { transform: translateY(0px); }
+        }
+        
+        .header h1, .header p, .header .badge-api {
+            position: relative;
+            z-index: 1;
+        }
+        
+        h1, h2, h3, h4, h5 {
+            font-weight: 700;
+        }
+        
+        h2 {
+            position: relative;
+            display: inline-block;
+            margin-bottom: 1.5rem;
+        }
+        
+        h2::after {
+            content: '';
+            position: absolute;
+            bottom: -10px;
+            left: 0;
+            width: 50px;
+            height: 4px;
+            background: linear-gradient(90deg, var(--primary-color), var(--accent-color));
+            border-radius: 2px;
+        }
+        
+        .badge-api {
+            background: linear-gradient(45deg, var(--primary-color), var(--accent-color));
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-weight: 600;
+            font-size: 14px;
+            box-shadow: 0 4px 15px rgba(255, 0, 0, 0.3);
+        }
+        
+        .endpoint {
+            background-color: var(--card-bg);
+            border-radius: 12px;
+            padding: 25px;
+            margin-bottom: 30px;
+            border-left: 4px solid var(--primary-color);
+            box-shadow: 0 6px 20px rgba(0, 0, 0, 0.2);
+            transition: transform 0.3s ease, box-shadow 0.3s ease;
+            position: relative;
+            overflow: hidden;
+        }
+        
+        .endpoint::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(135deg, rgba(255, 0, 0, 0.05) 0%, rgba(0, 0, 0, 0) 100%);
+            z-index: 0;
+        }
+        
+        .endpoint:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.25);
+        }
+        
+        .method {
+            display: inline-block;
+            padding: 6px 12px;
+            border-radius: 8px;
+            margin-right: 12px;
+            font-weight: bold;
+            font-size: 14px;
+            text-transform: uppercase;
+        }
+        
+        .get {
+            background-color: var(--accent-color);
+            color: white;
+        }
+        
+        .example {
+            background-color: rgba(255, 255, 255, 0.05);
+            border-radius: 8px;
+            padding: 15px;
+            margin-top: 20px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        
+        pre {
+            background-color: rgba(0, 0, 0, 0.3);
+            padding: 15px;
+            border-radius: 8px;
+            color: #f8f9fa;
+            overflow-x: auto;
+        }
+        
+        .features-card {
+            background: linear-gradient(145deg, var(--card-bg), var(--secondary-color));
+            border-radius: 12px;
+            padding: 25px;
+            height: 100%;
+            box-shadow: 0 8px 20px rgba(0, 0, 0, 0.25);
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            position: relative;
+            overflow: hidden;
+            z-index: 1;
+        }
+        
+        .features-card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 4px;
+            background: linear-gradient(90deg, var(--primary-color), var(--accent-color));
+            z-index: 2;
+        }
+        
+        .features-list {
+            list-style-type: none;
+            padding-left: 0;
+        }
+        
+        .features-list li {
+            margin-bottom: 15px;
+            display: flex;
+            align-items: center;
+            padding: 8px 0;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+            position: relative;
+            transition: transform 0.2s ease;
+        }
+        
+        .features-list li:hover {
+            transform: translateX(5px);
+        }
+        
+        .features-list li:last-child {
+            border-bottom: none;
+        }
+        
+        .features-list li i {
+            color: var(--primary-color);
+            margin-right: 12px;
+            font-size: 18px;
+        }
+        
+        .demo-section {
+            background: linear-gradient(145deg, var(--card-bg), var(--secondary-color));
+            border-radius: 12px;
+            padding: 25px;
+            margin-top: 30px;
+            box-shadow: 0 8px 20px rgba(0, 0, 0, 0.25);
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            position: relative;
+            overflow: hidden;
+        }
+        
+        .demo-section::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 4px;
+            background: linear-gradient(90deg, var(--primary-color), var(--accent-color));
+        }
+        
+        .form-control {
+            background-color: rgba(0, 0, 0, 0.2);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            color: var(--text-color);
+            border-radius: 8px;
+            padding: 12px 15px;
+        }
+        
+        .form-control:focus {
+            background-color: rgba(0, 0, 0, 0.3);
+            border-color: var(--accent-color);
+            color: var(--text-color);
+            box-shadow: 0 0 0 0.25rem rgba(66, 133, 244, 0.25);
+        }
+        
+        .form-check-input {
+            background-color: rgba(0, 0, 0, 0.2);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        
+        .form-check-input:checked {
+            background-color: var(--accent-color);
+            border-color: var(--accent-color);
+        }
+        
+        .btn-primary {
+            background: linear-gradient(45deg, var(--primary-color), var(--accent-color));
+            border: none;
+            border-radius: 8px;
+            padding: 12px 24px;
+            font-weight: 600;
+            transition: transform 0.2s ease, box-shadow 0.3s ease;
+            box-shadow: 0 4px 15px rgba(255, 0, 0, 0.3);
+            position: relative;
+            overflow: hidden;
+        }
+        
+        .btn-primary::after {
+            content: '';
+            position: absolute;
+            top: -50%;
+            left: -50%;
+            width: 200%;
+            height: 200%;
+            background: radial-gradient(circle, rgba(255, 255, 255, 0.3) 0%, rgba(255, 255, 255, 0) 70%);
+            transform: scale(0);
+            opacity: 0;
+            transition: transform 0.5s, opacity 0.5s;
+        }
+        
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(255, 0, 0, 0.4);
+            background: linear-gradient(45deg, #ff3e3e, #4f95ff);
+        }
+        
+        .btn-primary:hover::after {
+            transform: scale(1);
+            opacity: 1;
+        }
+        
+        .credit {
+            text-align: center;
+            margin-top: 3rem;
+            margin-bottom: 2rem;
+            padding: 15px;
+            background-color: var(--card-bg);
+            border-radius: 12px;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
+        }
+        
+        .credit a {
+            color: var(--primary-color);
+            text-decoration: none;
+            font-weight: 600;
+            transition: color 0.3s ease;
+        }
+        
+        .credit a:hover {
+            color: var(--accent-color);
+            text-decoration: underline;
+        }
+        
+        /* Animation */
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(20px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        
+        .endpoint, .features-card, .demo-section, .header {
+            animation: fadeIn 0.6s ease-out forwards;
+        }
+        
+        .endpoint:nth-child(2) {
+            animation-delay: 0.2s;
+        }
+        
+        .features-card {
+            animation-delay: 0.3s;
+        }
+        
+        .demo-section {
+            animation-delay: 0.4s;
+        }
+        
+        /* Custom scrollbar */
+        ::-webkit-scrollbar {
+            width: 10px;
+            height: 10px;
+        }
+        
+        ::-webkit-scrollbar-track {
+            background: rgba(0, 0, 0, 0.2);
+            border-radius: 10px;
+        }
+        
+        ::-webkit-scrollbar-thumb {
+            background: rgba(255, 0, 0, 0.5);
+            border-radius: 10px;
+        }
+        
+        ::-webkit-scrollbar-thumb:hover {
+            background: rgba(255, 0, 0, 0.7);
+        }
+        
+        /* Response example styling */
+        .response-example {
+            position: relative;
+            font-size: 14px;
+            font-family: 'Fira Code', monospace;
+            line-height: 1.5;
+        }
+        
+        .floating-elements {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            pointer-events: none;
+            z-index: -1;
+        }
+        
+        .floating-element {
+            position: absolute;
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: var(--primary-color);
+            opacity: 0.2;
+            animation: float-around 15s infinite linear;
+        }
+        
+        @keyframes float-around {
+            0% { transform: translate(0, 0); }
+            25% { transform: translate(100px, 50px); }
+            50% { transform: translate(200px, 0); }
+            75% { transform: translate(100px, -50px); }
+            100% { transform: translate(0, 0); }
+        }
+        
+        /* Admin link */
+        .admin-link {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            background: linear-gradient(45deg, var(--primary-color), var(--accent-color));
+            color: white;
+            width: 50px;
+            height: 50px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 0 4px 15px rgba(255, 0, 0, 0.3);
+            transition: transform 0.3s ease, box-shadow 0.3s ease;
+            z-index: 1000;
+        }
+        
+        .admin-link:hover {
+            transform: scale(1.1);
+            box-shadow: 0 6px 20px rgba(255, 0, 0, 0.4);
+        }
+        
+        .admin-link i {
+            font-size: 20px;
+            color: white;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <div class="logo">
+                <i class="fab fa-youtube"></i>
+            </div>
+            <h1>YouTube API Service</h1>
+            <p class="lead">Ultra-fast, reliable YouTube API with anti-bot protection</p>
+            <span class="badge-api">API Version 1.0</span>
+        </div>
+
+        <div class="row">
+            <div class="col-lg-8">
+                <h2><i class="fas fa-book me-2"></i>API Documentation</h2>
+                <p class="mb-4">This API provides seamless access to YouTube content while avoiding all bot detection mechanisms.</p>
+                
+                <div class="endpoint">
+                    <h3><span class="method get">GET</span>/youtube</h3>
+                    <p>Main endpoint to search or get video information</p>
+                    <h4>Parameters:</h4>
+                    <ul>
+                        <li><code>query</code> - YouTube URL, video ID, or search term</li>
+                        <li><code>video</code> - Boolean to get video stream (default: false)</li>
+                        <li><code>api_key</code> - Your API key (use <code>jaydip</code> for testing)</li>
+                    </ul>
+                    <div class="example">
+                        <h5><i class="fas fa-code me-2"></i>Example:</h5>
+                        <pre>/youtube?query=295&video=false&api_key=jaydip</pre>
+                    </div>
+                </div>
+                
+                <div class="endpoint">
+                    <h3><span class="method get">GET</span>/stream/:id</h3>
+                    <p>Stream media directly from YouTube</p>
+                    <p><i class="fas fa-info-circle me-2"></i>This endpoint is used internally by the API to stream media. You should not call it directly.</p>
+                </div>
+                
+                <h2 class="mt-5"><i class="fas fa-reply me-2"></i>Example Response</h2>
+                <pre class="response-example p-4">
+{
+  "id": "n_FCrCQ6-bA",
+  "title": "295 (Official Audio) | Sidhu Moose Wala | The Kidd | Moosetape",
+  "duration": 273,
+  "link": "https://www.youtube.com/watch?v=n_FCrCQ6-bA",
+  "channel": "Sidhu Moose Wala",
+  "views": 705107430,
+  "thumbnail": "https://i.ytimg.com/vi_webp/n_FCrCQ6-bA/maxresdefault.webp",
+  "stream_url": "http://example.com/stream/cd97fd73-2ee0-4896-a1a6-f93145a893d3",
+  "stream_type": "Audio"
+}
+                </pre>
+                <div class="floating-elements">
+                    <div class="floating-element" style="top: 10%; left: 20%; animation-delay: 0s;"></div>
+                    <div class="floating-element" style="top: 20%; left: 80%; animation-delay: 1s;"></div>
+                    <div class="floating-element" style="top: 50%; left: 50%; animation-delay: 2s;"></div>
+                    <div class="floating-element" style="top: 70%; left: 30%; animation-delay: 3s;"></div>
+                    <div class="floating-element" style="top: 90%; left: 70%; animation-delay: 4s;"></div>
+                </div>
+            </div>
+            
+            <div class="col-lg-4">
+                <div class="features-card">
+                    <h3 class="card-title mb-4"><i class="fas fa-bolt me-2"></i>Features</h3>
+                    <ul class="features-list">
+                        <li><i class="fas fa-tachometer-alt"></i>Ultra-fast search & play (0.5s response time)</li>
+                        <li><i class="fas fa-stream"></i>Seamless audio/video streaming</li>
+                        <li><i class="fas fa-broadcast-tower"></i>Live stream support</li>
+                        <li><i class="fas fa-cookie-bite"></i>No cookies, no headaches</li>
+                        <li><i class="fas fa-infinity"></i>Play anything — with no limits!</li>
+                    </ul>
+                    
+                    <h4 class="mt-4 mb-3"><i class="fas fa-cogs me-2"></i>Optimized for</h4>
+                    <ul class="features-list">
+                        <li><i class="fab fa-telegram"></i>Pyrogram, Telethon, TGCalls bots</li>
+                        <li><i class="fas fa-code"></i>PyTube & YTDl-free engine</li>
+                        <li><i class="fas fa-server"></i>24/7 uptime with stable performance</li>
+                    </ul>
+                </div>
+                
+                <div class="demo-section">
+                    <h3 class="mb-4"><i class="fas fa-flask me-2"></i>Try it out</h3>
+                    <div class="mb-3">
+                        <label for="demoUrl" class="form-label">YouTube URL or Search Term:</label>
+                        <input type="text" class="form-control" id="demoUrl" placeholder="Enter URL or search term">
+                    </div>
+                    <div class="mb-3 form-check">
+                        <input type="checkbox" class="form-check-input" id="demoVideo">
+                        <label class="form-check-label" for="demoVideo">Get video (instead of audio)</label>
+                    </div>
+                    <button type="button" class="btn btn-primary w-100" id="testApiBtn"><i class="fas fa-play me-2"></i>Test API</button>
+                    
+                    <div class="mt-4" id="resultContainer" style="display: none;">
+                        <h4><i class="fas fa-file-code me-2"></i>Result:</h4>
+                        <pre id="resultPre" class="p-3 mt-2" style="overflow-x: auto;"></pre>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="credit">
+            <p class="mb-0">Developed by <a href="https://t.me/INNOCENT_FUCKER" target="_blank"><i class="fab fa-telegram"></i> @INNOCENT_FUCKER</a></p>
+        </div>
+    </div>
+    
+    <!-- Admin Link (hidden, only visible to admins) -->
+    <a href="/admin" class="admin-link" id="adminLink" style="display: none;">
+        <i class="fas fa-lock"></i>
+    </a>
+    
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            const testApiBtn = document.getElementById('testApiBtn');
+            const resultContainer = document.getElementById('resultContainer');
+            const resultPre = document.getElementById('resultPre');
+            const adminLink = document.getElementById('adminLink');
+            
+            // Check if admin key cookie exists
+            function checkAdminAccess() {
+                // In a real app, this would be more secure
+                const adminKeyInUrl = new URLSearchParams(window.location.search).get('admin_key');
+                if (adminKeyInUrl === 'JAYDIP') {
+                    adminLink.style.display = 'flex';
+                    // Set a session cookie
+                    document.cookie = "admin_access=true; path=/;";
+                } else if (document.cookie.includes('admin_access=true')) {
+                    adminLink.style.display = 'flex';
+                }
+            }
+            
+            checkAdminAccess();
+            
+            // Demo API Testing
+            testApiBtn.addEventListener('click', function() {
+                const url = document.getElementById('demoUrl').value.trim();
+                const isVideo = document.getElementById('demoVideo').checked;
+                
+                if (!url) {
+                    alert('Please enter a YouTube URL or search term');
+                    return;
+                }
+                
+                // Show loading state
+                testApiBtn.disabled = true;
+                testApiBtn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Loading...';
+                
+                const apiUrl = `/youtube?query=${encodeURIComponent(url)}&video=${isVideo}&api_key=jaydip`;
+                
+                // Make API request
+                fetch(apiUrl)
+                    .then(response => response.json())
+                    .then(data => {
+                        resultPre.textContent = JSON.stringify(data, null, 2);
+                        resultContainer.style.display = 'block';
+                        
+                        // Restore button state
+                        testApiBtn.disabled = false;
+                        testApiBtn.innerHTML = '<i class="fas fa-play me-2"></i>Test API';
+                        
+                        // Scroll to results
+                        resultContainer.scrollIntoView({behavior: 'smooth'});
+                    })
+                    .catch(error => {
+                        resultPre.textContent = 'Error: ' + error;
+                        resultContainer.style.display = 'block';
+                        
+                        // Restore button state
+                        testApiBtn.disabled = false;
+                        testApiBtn.innerHTML = '<i class="fas fa-play me-2"></i>Test API';
+                    });
+            });
+            
+            // Populate with example search if demo section is empty
+            if (document.getElementById('demoUrl').value === '') {
+                document.getElementById('demoUrl').value = '295';
+            }
+            
+            // Add floating elements animation
+            function createFloatingElements() {
+                const container = document.querySelector('.floating-elements');
+                for (let i = 0; i < 10; i++) {
+                    const element = document.createElement('div');
+                    element.className = 'floating-element';
+                    element.style.top = Math.random() * 100 + '%';
+                    element.style.left = Math.random() * 100 + '%';
+                    element.style.animationDelay = Math.random() * 5 + 's';
+                    element.style.animationDuration = (Math.random() * 10 + 10) + 's';
+                    container.appendChild(element);
+                }
+            }
+            
+            createFloatingElements();
+        });
+    </script>
+</body>
+</html>
+"""
+
+ADMIN_HTML = """<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>YouTube API Admin Panel</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        :root {
+            --primary-color: #ff0000;
+            --secondary-color: #282828;
+            --accent-color: #4285F4;
+            --text-color: #ffffff;
+            --dark-bg: #121212;
+            --card-bg: #1e1e1e;
+            --success-color: #28a745;
+            --danger-color: #dc3545;
+            --warning-color: #ffc107;
+        }
+        
+        body {
+            background-color: var(--dark-bg);
+            color: var(--text-color);
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            padding-top: 30px;
+            padding-bottom: 50px;
+            min-height: 100vh;
+        }
+        
+        .header {
+            padding: 2.5rem 0;
+            text-align: center;
+            position: relative;
+            background: linear-gradient(135deg, var(--secondary-color) 0%, var(--dark-bg) 100%);
+            border-radius: 16px;
+            margin-bottom: 40px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+        }
+        
+        .logo {
+            font-size: 3rem;
+            color: var(--primary-color);
+            margin-bottom: 1rem;
+            filter: drop-shadow(0 0 10px rgba(255, 0, 0, 0.5));
+        }
+        
+        h1, h2, h3, h4, h5 {
+            font-weight: 700;
+        }
+        
+        .badge-api {
+            background: linear-gradient(45deg, var(--primary-color), var(--accent-color));
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-weight: 600;
+            font-size: 14px;
+            box-shadow: 0 4px 15px rgba(255, 0, 0, 0.3);
+        }
+        
+        .card {
+            background: linear-gradient(145deg, var(--card-bg), var(--secondary-color));
+            border-radius: 12px;
+            padding: 25px;
+            height: 100%;
+            box-shadow: 0 8px 20px rgba(0, 0, 0, 0.25);
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            margin-bottom: 25px;
+        }
+        
+        .form-control {
+            background-color: rgba(0, 0, 0, 0.2);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            color: var(--text-color);
+            border-radius: 8px;
+            padding: 12px 15px;
+        }
+        
+        .form-control:focus {
+            background-color: rgba(0, 0, 0, 0.3);
+            border-color: var(--accent-color);
+            color: var(--text-color);
+            box-shadow: 0 0 0 0.25rem rgba(66, 133, 244, 0.25);
+        }
+        
+        .form-select {
+            background-color: rgba(0, 0, 0, 0.2);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            color: var(--text-color);
+            border-radius: 8px;
+            padding: 12px 15px;
+        }
+        
+        .form-select:focus {
+            background-color: rgba(0, 0, 0, 0.3);
+            border-color: var(--accent-color);
+            color: var(--text-color);
+            box-shadow: 0 0 0 0.25rem rgba(66, 133, 244, 0.25);
+        }
+        
+        .btn-primary {
+            background: linear-gradient(45deg, var(--primary-color), var(--accent-color));
+            border: none;
+            border-radius: 8px;
+            padding: 12px 24px;
+            font-weight: 600;
+            transition: transform 0.2s ease, box-shadow 0.3s ease;
+            box-shadow: 0 4px 15px rgba(255, 0, 0, 0.3);
+        }
+        
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(255, 0, 0, 0.4);
+            background: linear-gradient(45deg, #ff3e3e, #4f95ff);
+        }
+        
+        .btn-danger {
+            background: linear-gradient(45deg, var(--danger-color), #ff6b6b);
+            border: none;
+            border-radius: 8px;
+            padding: 8px 16px;
+            font-weight: 600;
+            transition: transform 0.2s ease, box-shadow 0.3s ease;
+            box-shadow: 0 4px 15px rgba(220, 53, 69, 0.3);
+        }
+        
+        .btn-danger:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(220, 53, 69, 0.4);
+            background: linear-gradient(45deg, #ff5252, #ff8080);
+        }
+        
+        .table {
+            color: var(--text-color);
+        }
+        
+        .table thead th {
+            border-bottom: 2px solid rgba(255, 255, 255, 0.1);
+            color: var(--accent-color);
+            font-weight: 600;
+        }
+        
+        .table td, .table th {
+            border-color: rgba(255, 255, 255, 0.05);
+        }
+        
+        /* Status Badges */
+        .badge-active {
+            background-color: var(--success-color);
+            color: white;
+            padding: 5px 10px;
+            border-radius: 6px;
+            font-weight: 600;
+        }
+        
+        .badge-expired {
+            background-color: var(--danger-color);
+            color: white;
+            padding: 5px 10px;
+            border-radius: 6px;
+            font-weight: 600;
+        }
+        
+        .badge-admin {
+            background-color: var(--warning-color);
+            color: var(--dark-bg);
+            padding: 5px 10px;
+            border-radius: 6px;
+            font-weight: 600;
+        }
+        
+        /* Animation */
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(20px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        
+        .card {
+            animation: fadeIn 0.6s ease-out forwards;
+        }
+        
+        .card:nth-child(2) {
+            animation-delay: 0.2s;
+        }
+        
+        .card:nth-child(3) {
+            animation-delay: 0.3s;
+        }
+        
+        .card:nth-child(4) {
+            animation-delay: 0.4s;
+        }
+        
+        /* Custom scrollbar */
+        ::-webkit-scrollbar {
+            width: 10px;
+            height: 10px;
+        }
+        
+        ::-webkit-scrollbar-track {
+            background: rgba(0, 0, 0, 0.2);
+            border-radius: 10px;
+        }
+        
+        ::-webkit-scrollbar-thumb {
+            background: rgba(255, 0, 0, 0.5);
+            border-radius: 10px;
+        }
+        
+        ::-webkit-scrollbar-thumb:hover {
+            background: rgba(255, 0, 0, 0.7);
+        }
+        
+        /* Dashboard Metrics */
+        .metric-card {
+            background: linear-gradient(145deg, var(--card-bg), var(--secondary-color));
+            border-radius: 12px;
+            padding: 20px;
+            box-shadow: 0 8px 20px rgba(0, 0, 0, 0.25);
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            height: 100%;
+            position: relative;
+            overflow: hidden;
+        }
+        
+        .metric-card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 4px;
+            background: linear-gradient(90deg, var(--primary-color), var(--accent-color));
+        }
+        
+        .metric-value {
+            font-size: 32px;
+            font-weight: 700;
+            margin-bottom: 5px;
+        }
+        
+        .metric-label {
+            color: rgba(255, 255, 255, 0.7);
+            font-size: 14px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+        
+        .metric-icon {
+            position: absolute;
+            bottom: 10px;
+            right: 10px;
+            font-size: 48px;
+            opacity: 0.15;
+            color: var(--accent-color);
+        }
+        
+        .chart-container {
+            height: 300px;
+            margin-bottom: 20px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <div class="logo">
+                <i class="fab fa-youtube"></i>
+            </div>
+            <h1>YouTube API Admin Panel</h1>
+            <p class="lead">Manage API keys and monitor usage statistics</p>
+            <span class="badge-api">Admin Area</span>
+        </div>
+
+        <!-- Dashboard Overview -->
+        <h2 class="mb-4"><i class="fas fa-tachometer-alt me-2"></i>Dashboard</h2>
+        <div class="row">
+            <div class="col-md-3 mb-4">
+                <div class="metric-card">
+                    <div class="metric-value" id="total-requests">0</div>
+                    <div class="metric-label">Total Requests</div>
+                    <div class="metric-icon">
+                        <i class="fas fa-server"></i>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3 mb-4">
+                <div class="metric-card">
+                    <div class="metric-value" id="today-requests">0</div>
+                    <div class="metric-label">Today's Requests</div>
+                    <div class="metric-icon">
+                        <i class="fas fa-calendar-day"></i>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3 mb-4">
+                <div class="metric-card">
+                    <div class="metric-value" id="active-keys">0</div>
+                    <div class="metric-label">Active API Keys</div>
+                    <div class="metric-icon">
+                        <i class="fas fa-key"></i>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3 mb-4">
+                <div class="metric-card">
+                    <div class="metric-value" id="error-rate">0%</div>
+                    <div class="metric-label">Error Rate</div>
+                    <div class="metric-icon">
+                        <i class="fas fa-exclamation-triangle"></i>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Charts -->
+        <div class="row mt-4">
+            <div class="col-md-6 mb-4">
+                <div class="card">
+                    <h3 class="card-title mb-4"><i class="fas fa-chart-line me-2"></i>Requests Over Time</h3>
+                    <div class="chart-container">
+                        <canvas id="requestsChart"></canvas>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-6 mb-4">
+                <div class="card">
+                    <h3 class="card-title mb-4"><i class="fas fa-chart-pie me-2"></i>API Key Usage Distribution</h3>
+                    <div class="chart-container">
+                        <canvas id="keyDistributionChart"></canvas>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="row mt-4">
+            <!-- API Key Management -->
+            <div class="col-md-6">
+                <div class="card">
+                    <h3 class="card-title mb-4"><i class="fas fa-key me-2"></i>API Key Management</h3>
+                    
+                    <form id="createKeyForm" class="mb-4">
+                        <div class="mb-3">
+                            <label for="keyName" class="form-label">Name:</label>
+                            <input type="text" class="form-control" id="keyName" placeholder="Friend's name" required>
+                        </div>
+                        <div class="row">
+                            <div class="col-md-6 mb-3">
+                                <label for="keyDays" class="form-label">Valid for (days):</label>
+                                <input type="number" class="form-control" id="keyDays" value="30" min="1" max="365" required>
+                            </div>
+                            <div class="col-md-6 mb-3">
+                                <label for="keyLimit" class="form-label">Daily request limit:</label>
+                                <input type="number" class="form-control" id="keyLimit" value="100" min="10" max="10000" required>
+                            </div>
+                        </div>
+                        <div class="mb-3 form-check">
+                            <input type="checkbox" class="form-check-input" id="isAdmin">
+                            <label class="form-check-label" for="isAdmin">Grant admin privileges</label>
+                        </div>
+                        <button type="submit" class="btn btn-primary">
+                            <i class="fas fa-plus-circle me-2"></i>Create API Key
+                        </button>
+                    </form>
+                    
+                    <div id="keyCreationResult" class="alert alert-success" style="display: none;"></div>
+                </div>
+            </div>
+            
+            <!-- Recent API Logs -->
+            <div class="col-md-6">
+                <div class="card">
+                    <h3 class="card-title mb-4"><i class="fas fa-history me-2"></i>Recent API Logs</h3>
+                    <div class="table-responsive">
+                        <table class="table table-hover" id="recentLogsTable">
+                            <thead>
+                                <tr>
+                                    <th>Time</th>
+                                    <th>API Key</th>
+                                    <th>Endpoint</th>
+                                    <th>Status</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <!-- Logs will be populated via JavaScript -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- API Keys List -->
+        <div class="row mt-4">
+            <div class="col-12">
+                <div class="card">
+                    <h3 class="card-title mb-4"><i class="fas fa-list me-2"></i>All API Keys</h3>
+                    <div class="table-responsive">
+                        <table class="table table-hover" id="apiKeysTable">
+                            <thead>
+                                <tr>
+                                    <th>API Key</th>
+                                    <th>Name</th>
+                                    <th>Created</th>
+                                    <th>Expires</th>
+                                    <th>Daily Limit</th>
+                                    <th>Usage Today</th>
+                                    <th>Status</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <!-- API keys will be populated via JavaScript -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Footer -->
+        <div class="mt-5 text-center text-muted">
+            <p>YouTube API Admin Panel &copy; 2025 | <a href="/" class="text-danger">Back to API Documentation</a></p>
+        </div>
+    </div>
+    
+    <!-- Revoke Key Modal -->
+    <div class="modal fade" id="revokeKeyModal" tabindex="-1" aria-labelledby="revokeKeyModalLabel" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content bg-dark text-white">
+                <div class="modal-header border-bottom border-secondary">
+                    <h5 class="modal-title" id="revokeKeyModalLabel">Confirm Key Revocation</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <p>Are you sure you want to revoke the API key for <span id="keyNameToRevoke" class="fw-bold"></span>?</p>
+                    <p class="text-danger">This action cannot be undone!</p>
+                </div>
+                <div class="modal-footer border-top border-secondary">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="button" class="btn btn-danger" id="confirmRevokeBtn">
+                        <i class="fas fa-trash-alt me-2"></i>Revoke Key
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        let apiKeysList = [];
+        let revokeKeyId = null;
+        const revokeModal = new bootstrap.Modal(document.getElementById('revokeKeyModal'));
+        
+        document.addEventListener('DOMContentLoaded', function() {
+            // Fetch initial data
+            fetchDashboardMetrics();
+            fetchApiKeys();
+            fetchRecentLogs();
+            
+            // Initialize charts
+            initializeCharts();
+            
+            // Set up refresh interval (every 30 seconds)
+            setInterval(() => {
+                fetchDashboardMetrics();
+                fetchApiKeys();
+                fetchRecentLogs();
+            }, 30000);
+            
+            // Handle API key creation
+            document.getElementById('createKeyForm').addEventListener('submit', function(e) {
+                e.preventDefault();
+                createApiKey();
+            });
+            
+            // Handle key revocation confirmation
+            document.getElementById('confirmRevokeBtn').addEventListener('click', function() {
+                if (revokeKeyId) {
+                    revokeApiKey(revokeKeyId);
+                    revokeModal.hide();
+                }
+            });
+        });
+        
+        function fetchDashboardMetrics() {
+            fetch('/admin/metrics?admin_key=JAYDIP')
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error('Failed to fetch metrics');
+                    }
+                    return response.json();
+                })
+                .then(data => {
+                    document.getElementById('total-requests').textContent = data.total_requests;
+                    document.getElementById('today-requests').textContent = data.today_requests;
+                    document.getElementById('active-keys').textContent = data.active_keys;
+                    document.getElementById('error-rate').textContent = data.error_rate + '%';
+                    
+                    // Update charts data
+                    updateRequestsChart(data.daily_requests);
+                    updateKeyDistributionChart(data.key_distribution);
+                })
+                .catch(error => {
+                    console.error('Error fetching metrics:', error);
+                });
+        }
+        
+        function fetchApiKeys() {
+            fetch('/admin/list_api_keys?admin_key=JAYDIP')
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error('Failed to fetch API keys');
+                    }
+                    return response.json();
+                })
+                .then(data => {
+                    apiKeysList = data;
+                    renderApiKeysTable(data);
+                })
+                .catch(error => {
+                    console.error('Error fetching API keys:', error);
+                });
+        }
+        
+        function fetchRecentLogs() {
+            fetch('/admin/recent_logs?admin_key=JAYDIP')
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error('Failed to fetch logs');
+                    }
+                    return response.json();
+                })
+                .then(data => {
+                    renderLogsTable(data);
+                })
+                .catch(error => {
+                    console.error('Error fetching logs:', error);
+                });
+        }
+        
+        function renderApiKeysTable(keys) {
+            const tableBody = document.getElementById('apiKeysTable').querySelector('tbody');
+            tableBody.innerHTML = '';
+            
+            keys.forEach(key => {
+                const row = document.createElement('tr');
+                
+                // Format date strings
+                const createdDate = new Date(key.created_at).toLocaleDateString();
+                const expiryDate = new Date(key.valid_until).toLocaleDateString();
+                
+                // Determine status badge
+                let statusBadge = '';
+                if (key.is_admin) {
+                    statusBadge = `<span class="badge-admin">Admin</span>`;
+                } else if (new Date(key.valid_until) < new Date()) {
+                    statusBadge = `<span class="badge-expired">Expired</span>`;
+                } else {
+                    statusBadge = `<span class="badge-active">Active</span>`;
+                }
+                
+                row.innerHTML = `
+                    <td><code>${key.key}</code></td>
+                    <td>${key.name}</td>
+                    <td>${createdDate}</td>
+                    <td>${expiryDate}</td>
+                    <td>${key.daily_limit}</td>
+                    <td>${key.count}/${key.daily_limit}</td>
+                    <td>${statusBadge}</td>
+                    <td>
+                        <button class="btn btn-sm btn-danger revoke-btn" data-id="${key.id}" data-name="${key.name}">
+                            <i class="fas fa-trash-alt"></i>
+                        </button>
+                    </td>
+                `;
+                
+                tableBody.appendChild(row);
+            });
+            
+            // Add event listeners to revoke buttons
+            document.querySelectorAll('.revoke-btn').forEach(button => {
+                button.addEventListener('click', () => {
+                    const keyId = button.getAttribute('data-id');
+                    const keyName = button.getAttribute('data-name');
+                    
+                    // Set the key name in the modal
+                    document.getElementById('keyNameToRevoke').textContent = keyName;
+                    
+                    // Store the key ID for the confirm button
+                    revokeKeyId = keyId;
+                    
+                    // Show the modal
+                    revokeModal.show();
+                });
+            });
+        }
+        
+        function renderLogsTable(logs) {
+            const tableBody = document.getElementById('recentLogsTable').querySelector('tbody');
+            tableBody.innerHTML = '';
+            
+            logs.forEach(log => {
+                const row = document.createElement('tr');
+                
+                // Format time
+                const logTime = new Date(log.timestamp).toLocaleTimeString();
+                
+                // Determine status class
+                let statusClass = log.status >= 400 ? 'text-danger' : 'text-success';
+                
+                row.innerHTML = `
+                    <td>${logTime}</td>
+                    <td><code>${log.api_key}</code></td>
+                    <td>${log.endpoint}</td>
+                    <td class="${statusClass}">${log.status}</td>
+                `;
+                
+                tableBody.appendChild(row);
+            });
+        }
+        
+        function createApiKey() {
+            const name = document.getElementById('keyName').value;
+            const days = document.getElementById('keyDays').value;
+            const limit = document.getElementById('keyLimit').value;
+            const isAdmin = document.getElementById('isAdmin').checked;
+            
+            // Disable form during submission
+            const submitBtn = document.querySelector('#createKeyForm button[type="submit"]');
+            submitBtn.disabled = true;
+            submitBtn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Creating...';
+            
+            fetch('/admin/create_api_key?admin_key=JAYDIP', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    name: name,
+                    days_valid: parseInt(days),
+                    daily_limit: parseInt(limit),
+                    is_admin: isAdmin
+                })
+            })
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error('Failed to create API key');
+                }
+                return response.json();
+            })
+            .then(data => {
+                // Show success message
+                const resultDiv = document.getElementById('keyCreationResult');
+                resultDiv.style.display = 'block';
+                resultDiv.textContent = `API key created successfully: ${data.api_key}`;
+                
+                // Reset form
+                document.getElementById('createKeyForm').reset();
+                
+                // Refresh API keys list
+                fetchApiKeys();
+                
+                // Hide success message after 5 seconds
+                setTimeout(() => {
+                    resultDiv.style.display = 'none';
+                }, 5000);
+            })
+            .catch(error => {
+                console.error('Error creating API key:', error);
+                
+                // Show error message
+                const resultDiv = document.getElementById('keyCreationResult');
+                resultDiv.style.display = 'block';
+                resultDiv.className = 'alert alert-danger';
+                resultDiv.textContent = `Error: ${error.message}`;
+                
+                // Hide error message after 5 seconds
+                setTimeout(() => {
+                    resultDiv.style.display = 'none';
+                    resultDiv.className = 'alert alert-success';
+                }, 5000);
+            })
+            .finally(() => {
+                // Re-enable form
+                submitBtn.disabled = false;
+                submitBtn.innerHTML = '<i class="fas fa-plus-circle me-2"></i>Create API Key';
+            });
+        }
+        
+        function revokeApiKey(keyId) {
+            fetch('/admin/revoke_api_key?admin_key=JAYDIP', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    id: keyId
+                })
+            })
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error('Failed to revoke API key');
+                }
+                return response.json();
+            })
+            .then(data => {
+                // Refresh API keys list
+                fetchApiKeys();
+            })
+            .catch(error => {
+                console.error('Error revoking API key:', error);
+                alert('Error: ' + error.message);
+            });
+        }
+        
+        // Charts
+        let requestsChart, keyDistributionChart;
+        
+        function initializeCharts() {
+            // Requests Over Time Chart
+            const requestsCtx = document.getElementById('requestsChart').getContext('2d');
+            requestsChart = new Chart(requestsCtx, {
+                type: 'line',
+                data: {
+                    labels: Array.from({length: 7}, (_, i) => {
+                        const d = new Date();
+                        d.setDate(d.getDate() - (6 - i));
+                        return d.toLocaleDateString(undefined, {weekday: 'short'});
+                    }),
+                    datasets: [{
+                        label: 'Requests',
+                        data: [0, 0, 0, 0, 0, 0, 0],
+                        borderColor: '#ff0000',
+                        backgroundColor: 'rgba(255, 0, 0, 0.1)',
+                        tension: 0.4,
+                        fill: true
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            display: false
+                        }
+                    },
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            grid: {
+                                color: 'rgba(255, 255, 255, 0.1)'
+                            },
+                            ticks: {
+                                color: 'rgba(255, 255, 255, 0.7)'
+                            }
+                        },
+                        x: {
+                            grid: {
+                                color: 'rgba(255, 255, 255, 0.1)'
+                            },
+                            ticks: {
+                                color: 'rgba(255, 255, 255, 0.7)'
+                            }
+                        }
+                    }
+                }
+            });
+            
+            // API Key Distribution Chart
+            const keyDistributionCtx = document.getElementById('keyDistributionChart').getContext('2d');
+            keyDistributionChart = new Chart(keyDistributionCtx, {
+                type: 'doughnut',
+                data: {
+                    labels: ['No data available'],
+                    datasets: [{
+                        data: [1],
+                        backgroundColor: ['#4285F4'],
+                        borderWidth: 0
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            position: 'right',
+                            labels: {
+                                color: 'rgba(255, 255, 255, 0.7)',
+                                padding: 20,
+                                font: {
+                                    size: 12
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+        }
+        
+        function updateRequestsChart(dailyRequests) {
+            const labels = Object.keys(dailyRequests);
+            const data = Object.values(dailyRequests);
+            
+            requestsChart.data.labels = labels;
+            requestsChart.data.datasets[0].data = data;
+            requestsChart.update();
+        }
+        
+        function updateKeyDistributionChart(keyDistribution) {
+            // Only update if we have data
+            if (Object.keys(keyDistribution).length > 0) {
+                const labels = Object.keys(keyDistribution);
+                const data = Object.values(keyDistribution);
+                
+                // Generate colors
+                const colors = labels.map((_, i) => {
+                    const hue = (i * 137) % 360; // Golden ratio to get visually distinct colors
+                    return `hsl(${hue}, 70%, 60%)`;
+                });
+                
+                keyDistributionChart.data.labels = labels;
+                keyDistributionChart.data.datasets[0].data = data;
+                keyDistributionChart.data.datasets[0].backgroundColor = colors;
+                keyDistributionChart.update();
+            }
+        }
+    </script>
+</body>
+</html>
+"""
+
 def get_random_proxy():
     """Get a random proxy from the list to avoid IP bans"""
     if not PROXY_LIST:
@@ -121,19 +1628,26 @@ def cached(timeout=CACHE_TIMEOUT):
     def decorator(func):
         @wraps(func)
         def wrapper(*args, **kwargs):
-            if not kwargs.get('bypass_cache', False):
-                cache_key = generate_cache_key(func.__name__, *args, **kwargs)
-                cached_result = cache.get(cache_key)
-                if cached_result:
-                    cached_time, result = cached_result
-                    if time.time() - cached_time < timeout:
-                        return result
+            # Skip cache if bypass_cache is True
+            if kwargs.get('bypass_cache', False):
+                result = func(*args, **kwargs)
+                return result
             
+            # Generate cache key
+            cache_key = generate_cache_key(func.__name__, *args, **kwargs)
+            
+            # Check if result is in cache
+            cached_result = cache.get(cache_key)
+            if cached_result:
+                cached_time, result = cached_result
+                if time.time() - cached_time < timeout:
+                    return result
+            
+            # Call the function
             result = func(*args, **kwargs)
             
-            if not kwargs.get('bypass_cache', False):
-                cache_key = generate_cache_key(func.__name__, *args, **kwargs)
-                cache[cache_key] = (time.time(), result)
+            # Store in cache
+            cache[cache_key] = (time.time(), result)
             
             return result
         return wrapper
@@ -274,13 +1788,23 @@ def required_api_key(func):
             response = func(*args, **kwargs)
             
             # Log the successful request
-            log_api_request(api_key_str, request.path, request.args.get('query'), 
+            if hasattr(request, 'args') and request.args:
+                query = request.args.get('query')
+            else:
+                query = None
+                
+            log_api_request(api_key_str, request.path, query, 
                             response[1] if isinstance(response, tuple) else 200)
             
             return response
         except Exception as e:
             # Log the failed request
-            log_api_request(api_key_str, request.path, request.args.get('query'), 500)
+            if hasattr(request, 'args') and request.args:
+                query = request.args.get('query')
+            else:
+                query = None
+                
+            log_api_request(api_key_str, request.path, query, 500)
             raise e
     
     return decorated_function
@@ -313,8 +1837,7 @@ class YouTubeAPIService:
         try:
             add_jitter(1)  # Add a small delay
             
-            # Fix for AsyncClient.__init__() error with proxies
-            # Bypassing youtubesearchpython VideosSearch which causes proxies error
+            # Use yt-dlp for search to avoid proxy issues
             options = clean_ytdl_options()
             options.update({
                 "quiet": True,
@@ -377,17 +1900,16 @@ class YouTubeAPIService:
             if not is_youtube_url(url):
                 return False
             
-            # Quick check using oembed endpoint
-            async with httpx.AsyncClient(timeout=10) as client:
-                try:
-                    oembed_url = f"https://www.youtube.com/oembed?url={url}&format=json"
-                    response = await client.get(
-                        oembed_url, 
-                        headers={"User-Agent": get_random_user_agent()}
-                    )
-                    return response.status_code == 200
-                except:
-                    return False
+            # Use yt-dlp to check if the URL exists
+            options = clean_ytdl_options()
+            options.update({
+                "skip_download": True,
+                "extract_flat": True,
+            })
+            
+            with yt_dlp.YoutubeDL(options) as ydl:
+                ydl.extract_info(url, download=False, process=False)
+                return True
         except Exception as e:
             logger.error(f"Error checking if URL exists: {e}")
             return False
@@ -418,72 +1940,35 @@ class YouTubeAPIService:
                     raise ValueError(f"No videos found for query: {url}")
             
             url = normalize_url(url)
-            add_jitter(1)  # Add a small delay
             
-            # Try with youtube-search-python first
-            try:
-                results = VideosSearch(url, limit=1)
-                result_dict = await results.next()
-                
-                if "result" in result_dict and result_dict["result"]:
-                    result = result_dict["result"][0]
-                    
-                    title = result["title"]
-                    duration_text = result.get("duration", "0:00")
-                    thumbnail = result.get("thumbnails", [{}])[0].get("url", "").split("?")[0]
-                    vid_id = result["id"]
-                    channel = result.get("channel", {}).get("name", "")
-                    views = result.get("viewCount", {}).get("text", "0").replace(" views", "").replace(",", "")
-                    
-                    duration = time_to_seconds(duration_text)
-                    
-                    return {
-                        "id": vid_id,
-                        "title": title,
-                        "duration": duration,
-                        "duration_text": duration_text,
-                        "channel": channel,
-                        "views": views,
-                        "thumbnail": thumbnail,
-                        "link": f"https://www.youtube.com/watch?v={vid_id}"
-                    }
-            except Exception as e:
-                logger.warning(f"Error getting details with VideosSearch: {e}")
-            
-            # Fallback to yt-dlp
+            # Use yt-dlp to get video details
             options = clean_ytdl_options()
+            
             with yt_dlp.YoutubeDL(options) as ydl:
                 info = ydl.extract_info(url, download=False)
                 
+                video_id = info.get("id", "")
                 title = info.get("title", "Unknown")
                 duration = info.get("duration", 0)
                 
-                # Format duration as mm:ss or hh:mm:ss
-                if duration > 3600:
-                    hours, remainder = divmod(duration, 3600)
-                    minutes, seconds = divmod(remainder, 60)
-                    duration_text = f"{hours}:{minutes:02d}:{seconds:02d}"
-                else:
-                    minutes, seconds = divmod(duration, 60)
-                    duration_text = f"{minutes}:{seconds:02d}"
+                # Format duration
+                duration_text = str(datetime.timedelta(seconds=duration)) if duration else "0:00"
+                if duration_text.startswith('0:'):
+                    duration_text = duration_text[2:]
                 
                 thumbnail = info.get("thumbnail", "")
-                if isinstance(thumbnail, dict) and "url" in thumbnail:
-                    thumbnail = thumbnail["url"]
-                
-                vid_id = info.get("id", "")
-                channel = info.get("channel", "")
+                channel = info.get("uploader", "")
                 views = info.get("view_count", 0)
                 
                 return {
-                    "id": vid_id,
+                    "id": video_id,
                     "title": title,
                     "duration": duration,
                     "duration_text": duration_text,
                     "channel": channel,
                     "views": views,
                     "thumbnail": thumbnail,
-                    "link": f"https://www.youtube.com/watch?v={vid_id}"
+                    "link": f"https://www.youtube.com/watch?v={video_id}"
                 }
         except Exception as e:
             logger.error(f"Error getting video details: {e}")
@@ -497,27 +1982,6 @@ class YouTubeAPIService:
                 "thumbnail": "",
                 "link": ""
             }
-    
-    @staticmethod
-    @cached()
-    async def get_title(url, video_id=None):
-        """Get video title"""
-        details = await YouTubeAPIService.get_details(url, video_id)
-        return details.get("title", "Unknown")
-    
-    @staticmethod
-    @cached()
-    async def get_duration(url, video_id=None):
-        """Get video duration"""
-        details = await YouTubeAPIService.get_details(url, video_id)
-        return details.get("duration_text", "0:00")
-    
-    @staticmethod
-    @cached()
-    async def get_thumbnail(url, video_id=None):
-        """Get video thumbnail"""
-        details = await YouTubeAPIService.get_details(url, video_id)
-        return details.get("thumbnail", "")
     
     @staticmethod
     @cached()
@@ -535,7 +1999,6 @@ class YouTubeAPIService:
                     raise ValueError(f"No videos found for query: {url}")
             
             url = normalize_url(url)
-            add_jitter(1)  # Add a small delay
             
             # Generate a unique stream ID
             stream_id = str(uuid.uuid4())
@@ -549,15 +2012,30 @@ class YouTubeAPIService:
             
             with yt_dlp.YoutubeDL(options) as ydl:
                 info = ydl.extract_info(url, download=False)
-                best_format = info.get("url", "")
                 
-                if not best_format:
+                if info and 'url' in info:
+                    stream_url = info['url']
+                else:
+                    formats = info.get('formats', [])
+                    if formats:
+                        for fmt in formats:
+                            if (is_video and fmt.get('height', 0) <= 720 and fmt.get('acodec', 'none') != 'none') or \
+                               (not is_video and fmt.get('acodec', 'none') != 'none' and fmt.get('vcodec', '') == 'none'):
+                                stream_url = fmt.get('url', '')
+                                break
+                        else:
+                            # If no suitable format found, use the best available
+                            stream_url = formats[-1].get('url', '')
+                    else:
+                        raise ValueError("No suitable formats found")
+                
+                if not stream_url:
                     raise ValueError("Could not extract stream URL")
                 
                 # Store the URL in cache for streaming
                 stream_key = f"stream:{stream_id}"
                 cache[stream_key] = {
-                    "url": best_format,
+                    "url": stream_url,
                     "created_at": time.time(),
                     "is_video": is_video,
                     "info": info
@@ -568,248 +2046,6 @@ class YouTubeAPIService:
         except Exception as e:
             logger.error(f"Error getting stream URL: {e}")
             return ""
-    
-    @staticmethod
-    @cached()
-    async def get_playlist(url, limit=10, user_id=None, list_id=None):
-        """Get playlist videos"""
-        try:
-            if list_id:
-                url = f"https://youtube.com/playlist?list={list_id}"
-            
-            if "&" in url:
-                url = url.split("&")[0]
-            
-            options = clean_ytdl_options()
-            options.update({
-                "playlistend": int(limit),
-                "extract_flat": True,
-                "skip_download": True,
-            })
-            
-            with yt_dlp.YoutubeDL(options) as ydl:
-                info = ydl.extract_info(url, download=False)
-                entries = info.get("entries", [])
-                
-                result = []
-                for entry in entries:
-                    if entry.get("id"):
-                        result.append(entry["id"])
-                
-                return result
-        except Exception as e:
-            logger.error(f"Error getting playlist: {e}")
-            return []
-    
-    @staticmethod
-    @cached()
-    async def get_track(url, video_id=None):
-        """Get track details"""
-        try:
-            details = await YouTubeAPIService.get_details(url, video_id)
-            
-            track_details = {
-                "title": details.get("title", "Unknown"),
-                "link": details.get("link", ""),
-                "vidid": details.get("id", ""),
-                "duration_min": details.get("duration_text", "0:00"),
-                "thumb": details.get("thumbnail", ""),
-            }
-            
-            return track_details, details.get("id", "")
-        except Exception as e:
-            logger.error(f"Error getting track: {e}")
-            return {"title": "Unknown", "link": "", "vidid": "", "duration_min": "0:00", "thumb": ""}, ""
-    
-    @staticmethod
-    @cached()
-    async def get_formats(url, video_id=None):
-        """Get available formats for a video"""
-        try:
-            if video_id:
-                url = f"https://www.youtube.com/watch?v={video_id}"
-            elif url.isdigit() or (url.startswith("-") and url[1:].isdigit()) or not is_youtube_url(url):
-                # If it's just a number or not a YouTube URL, treat it as a search query
-                search_results = await YouTubeAPIService.search_videos(url, limit=1)
-                if search_results:
-                    url = search_results[0]["link"]
-                else:
-                    raise ValueError(f"No videos found for query: {url}")
-            
-            url = normalize_url(url)
-            
-            options = clean_ytdl_options()
-                
-            with yt_dlp.YoutubeDL(options) as ydl:
-                info = ydl.extract_info(url, download=False)
-                
-                formats_available = []
-                for format in info.get("formats", []):
-                    try:
-                        format_str = format.get("format", "")
-                        if not format_str or "dash" in format_str.lower():
-                            continue
-                        
-                        format_data = {
-                            "format": format.get("format", ""),
-                            "filesize": format.get("filesize", 0),
-                            "format_id": format.get("format_id", ""),
-                            "ext": format.get("ext", ""),
-                            "format_note": format.get("format_note", ""),
-                            "yturl": url,
-                        }
-                        
-                        # Check if all required fields are present
-                        if all(format_data.values()):
-                            formats_available.append(format_data)
-                    except Exception as e:
-                        logger.error(f"Error processing format: {e}")
-                
-                return formats_available, url
-        except Exception as e:
-            logger.error(f"Error getting formats: {e}")
-            return [], ""
-    
-    @staticmethod
-    @cached()
-    async def slider(link, query_type, video_id=None):
-        """Get related videos for a slider"""
-        try:
-            if video_id:
-                link = f"https://www.youtube.com/watch?v={video_id}"
-            
-            link = normalize_url(link)
-            query_type = int(query_type) if str(query_type).isdigit() else 0
-            
-            a = VideosSearch(link, limit=query_type + 5)  # Get a few extra in case some fail
-            a_result = await a.next()
-            result = a_result.get("result", []) if a_result else []
-            
-            if not result or query_type >= len(result):
-                return "Unknown", "0:00", "", ""
-            
-            title = result[query_type]["title"]
-            duration_min = result[query_type].get("duration", "0:00")
-            thumbnails = result[query_type].get("thumbnails", [{}])
-            thumbnail = thumbnails[0].get("url", "").split("?")[0] if thumbnails else ""
-            vidid = result[query_type]["id"]
-            
-            return title, duration_min, thumbnail, vidid
-        except Exception as e:
-            logger.error(f"Error getting slider data: {e}")
-            return "Unknown", "0:00", "", ""
-    
-    @staticmethod
-    async def download(
-        link, 
-        video=False, 
-        video_id=None, 
-        format_id=None, 
-        title=None
-    ):
-        """Download a video or audio file"""
-        try:
-            if video_id:
-                link = f"https://www.youtube.com/watch?v={video_id}"
-            elif link.isdigit() or (link.startswith("-") and link[1:].isdigit()) or not is_youtube_url(link):
-                # If it's just a number or not a YouTube URL, treat it as a search query
-                search_results = await YouTubeAPIService.search_videos(link, limit=1)
-                if search_results:
-                    link = search_results[0]["link"]
-                    if not title:
-                        title = search_results[0]["title"]
-                else:
-                    raise ValueError(f"No videos found for query: {link}")
-                    
-            link = normalize_url(link)
-            
-            # Generate a unique download token
-            download_token = str(uuid.uuid4())
-            
-            if not title:
-                # Get video details to get the title
-                details = await YouTubeAPIService.get_details(link)
-                title = details.get("title", "download")
-            
-            # Clean title for filename
-            safe_title = re.sub(r'[^\w\-_\. ]', '_', title)
-            safe_title = safe_title[:50]  # Truncate long titles
-            
-            # Set output path
-            output_path = os.path.join(DOWNLOAD_DIR, safe_title)
-            
-            # Configure yt-dlp options
-            options = clean_ytdl_options()
-            
-            if format_id:
-                # Use specific format
-                if video:
-                    # Format for video
-                    options.update({
-                        "format": f"{format_id}+bestaudio",
-                        "merge_output_format": "mp4",
-                    })
-                    output_path += ".mp4"
-                else:
-                    # Format for audio
-                    options.update({
-                        "format": format_id,
-                        "postprocessors": [{
-                            "key": "FFmpegExtractAudio",
-                            "preferredcodec": "mp3",
-                            "preferredquality": "192",
-                        }],
-                    })
-                    output_path += ".mp3"
-            else:
-                # Use best format
-                if video:
-                    options.update({
-                        "format": "(bestvideo[height<=?720][width<=?1280][ext=mp4])+(bestaudio[ext=m4a])",
-                        "merge_output_format": "mp4",
-                    })
-                    output_path += ".mp4"
-                else:
-                    options.update({
-                        "format": "bestaudio/best",
-                        "postprocessors": [{
-                            "key": "FFmpegExtractAudio",
-                            "preferredcodec": "mp3",
-                            "preferredquality": "192",
-                        }],
-                    })
-                    output_path += ".mp3"
-            
-            # Set output template
-            options["outtmpl"] = output_path
-            
-            # Download the file
-            with yt_dlp.YoutubeDL(options) as ydl:
-                ydl.download([link])
-            
-            # Check if file exists
-            if video:
-                final_path = output_path
-                if not os.path.exists(final_path):
-                    raise FileNotFoundError(f"Downloaded file not found: {final_path}")
-            else:
-                # For audio, the extension is changed by FFmpeg
-                final_path = os.path.splitext(output_path)[0] + ".mp3"
-                if not os.path.exists(final_path):
-                    raise FileNotFoundError(f"Downloaded file not found: {final_path}")
-            
-            # Store download info
-            cache[f"download:{download_token}"] = {
-                "path": final_path,
-                "created_at": time.time(),
-                "is_video": video
-            }
-            
-            # Return download token
-            return f"/download/{download_token}", None
-        except Exception as e:
-            logger.error(f"Error downloading: {e}")
-            return "", str(e)
 
 def run_async(coro):
     """Run an async function from a synchronous context"""
@@ -820,17 +2056,72 @@ def run_async(coro):
     finally:
         loop.close()
 
-# Main Routes
+def init_db_data():
+    """Initialize database with default data"""
+    try:
+        with app.app_context():
+            db.create_all()
+            
+            # Check if admin API key exists
+            admin_key = ApiKey.query.filter_by(key="JAYDIP").first()
+            if not admin_key:
+                # Create admin key
+                admin_key = ApiKey(
+                    key="JAYDIP",
+                    name="Admin Key",
+                    is_admin=True,
+                    created_at=datetime.datetime.now(),
+                    valid_until=datetime.datetime.now() + datetime.timedelta(days=365),
+                    daily_limit=10000,
+                    reset_at=datetime.datetime.now() + datetime.timedelta(days=1),
+                    count=0
+                )
+                db.session.add(admin_key)
+                db.session.commit()
+                
+                # Create API request key
+                api_request_key = ApiKey(
+                    key="jaydip",
+                    name="API Request Key",
+                    is_admin=False,
+                    created_at=datetime.datetime.now(),
+                    valid_until=datetime.datetime.now() + datetime.timedelta(days=365),
+                    daily_limit=5000,
+                    reset_at=datetime.datetime.now() + datetime.timedelta(days=1),
+                    count=0,
+                    created_by=admin_key.id
+                )
+                db.session.add(api_request_key)
+                
+                # Create demo key
+                demo_key = ApiKey(
+                    key="1a873582a7c83342f961cc0a177b2b26",
+                    name="Public Demo Key",
+                    is_admin=False,
+                    created_at=datetime.datetime.now(),
+                    valid_until=datetime.datetime.now() + datetime.timedelta(days=365),
+                    daily_limit=100,
+                    reset_at=datetime.datetime.now() + datetime.timedelta(days=1),
+                    count=0,
+                    created_by=admin_key.id
+                )
+                db.session.add(demo_key)
+                
+                db.session.commit()
+    except Exception as e:
+        logger.error(f"Error initializing database: {e}")
+
+# Routes
 @app.route("/", methods=["GET"])
 def index():
     """Home page with API documentation"""
-    return render_template("index.html")
+    return INDEX_HTML
 
 @app.route("/admin", methods=["GET"])
 @required_admin_key
 def admin_panel():
     """Admin panel for managing API keys"""
-    return render_template("admin.html")
+    return ADMIN_HTML
 
 @app.route("/youtube", methods=["GET"])
 @required_api_key
@@ -856,17 +2147,26 @@ def youtube():
                 return jsonify({"error": "No videos found"}), 404
             
             video_data = search_results[0]
+            
+            # Get stream URL
             stream_url = run_async(YouTubeAPIService.get_stream_url(video_data["link"], is_video=video))
             
+            if not stream_url:
+                return jsonify({"error": "Failed to get stream URL"}), 500
+            
+            # Format the host URL for the response
+            host_url = request.host_url.rstrip("/")
+            
+            # Format response to match exactly the requested format
             response = {
                 "id": video_data["id"],
                 "title": video_data["title"],
                 "duration": video_data["duration"],
                 "link": video_data["link"],
                 "channel": video_data["channel"],
-                "views": video_data["views"],
+                "views": int(video_data["views"]) if str(video_data["views"]).isdigit() else 0,
                 "thumbnail": video_data["thumbnail"],
-                "stream_url": request.host_url.rstrip("/") + stream_url,
+                "stream_url": host_url + stream_url,
                 "stream_type": "Video" if video else "Audio"
             }
             
@@ -874,8 +2174,21 @@ def youtube():
         
         # Handle direct video case
         video_url = query if is_url else f"https://www.youtube.com/watch?v={query}"
+        
+        # Get video details
         video_details = run_async(YouTubeAPIService.get_details(video_url))
+        
+        if not video_details or not video_details.get("id"):
+            return jsonify({"error": "No video found"}), 404
+            
+        # Get stream URL
         stream_url = run_async(YouTubeAPIService.get_stream_url(video_url, is_video=video))
+        
+        if not stream_url:
+            return jsonify({"error": "Failed to get stream URL"}), 500
+        
+        # Format the host URL for the response
+        host_url = request.host_url.rstrip("/")
         
         # Format response to match exactly the requested format
         response = {
@@ -886,7 +2199,7 @@ def youtube():
             "channel": video_details["channel"],
             "views": int(video_details["views"]) if str(video_details["views"]).isdigit() else 0,
             "thumbnail": video_details["thumbnail"],
-            "stream_url": request.host_url.rstrip("/") + stream_url,
+            "stream_url": host_url + stream_url,
             "stream_type": "Video" if video else "Audio"
         }
         
@@ -944,36 +2257,6 @@ def stream_media(stream_id):
             "Cache-Control": "no-cache"
         }
     )
-
-@app.route("/download/<token>", methods=["GET"])
-def serve_download(token):
-    """Serve a downloaded file"""
-    download_key = f"download:{token}"
-    download_data = cache.get(download_key)
-    
-    if not download_data:
-        return jsonify({"error": "Download not found or expired"}), 404
-    
-    # Get the file path
-    file_path = download_data.get("path")
-    
-    if not os.path.exists(file_path):
-        return jsonify({"error": "File not found"}), 404
-    
-    # Determine file type and name
-    is_video = file_path.endswith(".mp4")
-    filename = os.path.basename(file_path)
-    
-    try:
-        return send_file(
-            file_path,
-            as_attachment=True,
-            download_name=filename,
-            mimetype="video/mp4" if is_video else "audio/mp3"
-        )
-    except Exception as e:
-        logger.error(f"Error serving download: {e}")
-        return jsonify({"error": "Failed to serve file"}), 500
 
 # Admin API Routes
 @app.route("/admin/metrics", methods=["GET"])
@@ -1212,24 +2495,11 @@ def server_error_handler(e):
         "message": str(e)
     }), 500
 
-# Add cleanup job
-def run_cleanup_periodically():
-    """Run cleanup job periodically"""
-    while True:
-        time.sleep(60 * 60)  # Run every hour
-        try:
-            # Clean up old files
-            with app.app_context():
-                cleanup_old_files()
-        except Exception as e:
-            logger.error(f"Error in cleanup job: {e}")
+# Initialize database with data
+with app.app_context():
+    init_db_data()
 
-# Start background cleanup job
+# Run the app if this is the main module
 if __name__ == "__main__":
-    # Start cleanup thread
-    import threading
-    cleanup_thread = threading.Thread(target=run_cleanup_periodically, daemon=True)
-    cleanup_thread.start()
-    
     # Run Flask app
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)), debug=True)
