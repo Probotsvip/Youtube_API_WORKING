@@ -27,7 +27,11 @@ API_KEYS = {
         "name": "Public Demo Key",
         "limit": 100
     },
-    "my_secret_key": {
+    "jaydip": {
+        "name": "API Request Key",
+        "limit": 5000
+    },
+    "JAYDIP": {
         "name": "Admin Key",
         "limit": 10000
     }
@@ -55,7 +59,7 @@ def get_random_user_agent():
 
 def add_jitter(seconds=1):
     """Add random delay to make requests seem more human-like"""
-    jitter = random.uniform(0.1, seconds)
+    jitter = random.uniform(0.1, float(seconds))
     time.sleep(jitter)
 
 def generate_cache_key(func_name, *args, **kwargs):
@@ -419,13 +423,14 @@ def youtube():
         video_details = run_async(YouTubeAPIService.get_details(video_url))
         stream_url = run_async(YouTubeAPIService.get_stream_url(video_url, is_video=video))
         
+        # Format response to match exactly the requested format
         response = {
             "id": video_details["id"],
             "title": video_details["title"],
             "duration": video_details["duration"],
             "link": video_details["link"],
             "channel": video_details["channel"],
-            "views": video_details["views"],
+            "views": int(video_details["views"]) if str(video_details["views"]).isdigit() else 0,
             "thumbnail": video_details["thumbnail"],
             "stream_url": request.host_url.rstrip("/") + stream_url,
             "stream_type": "Video" if video else "Audio"
@@ -495,102 +500,289 @@ def index():
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>YouTube API Service</title>
-    <link href="https://cdn.replit.com/agent/bootstrap-agent-dark-theme.min.css" rel="stylesheet" crossorigin="anonymous">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
     <style>
+        :root {
+            --primary-color: #ff0000;
+            --secondary-color: #282828;
+            --accent-color: #4285F4;
+            --text-color: #ffffff;
+            --dark-bg: #121212;
+            --card-bg: #1e1e1e;
+        }
+        
         body {
-            padding-top: 20px;
+            background-color: var(--dark-bg);
+            color: var(--text-color);
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            padding-top: 30px;
+            padding-bottom: 50px;
+            min-height: 100vh;
         }
+        
         .header {
-            padding: 2rem 0;
+            padding: 2.5rem 0;
             text-align: center;
+            position: relative;
+            background: linear-gradient(135deg, var(--secondary-color) 0%, var(--dark-bg) 100%);
+            border-radius: 16px;
+            margin-bottom: 40px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
         }
+        
+        .logo {
+            font-size: 3rem;
+            color: var(--primary-color);
+            margin-bottom: 1rem;
+            filter: drop-shadow(0 0 10px rgba(255, 0, 0, 0.5));
+        }
+        
+        h1, h2, h3, h4, h5 {
+            font-weight: 700;
+        }
+        
+        .badge-api {
+            background: linear-gradient(45deg, var(--primary-color), var(--accent-color));
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-weight: 600;
+            font-size: 14px;
+            box-shadow: 0 4px 15px rgba(255, 0, 0, 0.3);
+        }
+        
         .endpoint {
-            background-color: var(--bs-dark);
-            border-radius: 8px;
-            padding: 15px;
-            margin-bottom: 20px;
+            background-color: var(--card-bg);
+            border-radius: 12px;
+            padding: 25px;
+            margin-bottom: 30px;
+            border-left: 4px solid var(--primary-color);
+            box-shadow: 0 6px 20px rgba(0, 0, 0, 0.2);
+            transition: transform 0.3s ease, box-shadow 0.3s ease;
         }
+        
+        .endpoint:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.25);
+        }
+        
         .method {
             display: inline-block;
-            padding: 5px 10px;
-            border-radius: 4px;
-            margin-right: 10px;
+            padding: 6px 12px;
+            border-radius: 8px;
+            margin-right: 12px;
             font-weight: bold;
+            font-size: 14px;
+            text-transform: uppercase;
         }
+        
         .get {
-            background-color: var(--bs-info);
-            color: var(--bs-dark);
+            background-color: var(--accent-color);
+            color: white;
         }
+        
         .example {
-            background-color: var(--bs-secondary);
-            border-radius: 4px;
-            padding: 10px;
-            margin-top: 10px;
+            background-color: rgba(255, 255, 255, 0.05);
+            border-radius: 8px;
+            padding: 15px;
+            margin-top: 20px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
         }
+        
+        pre {
+            background-color: rgba(0, 0, 0, 0.3);
+            padding: 15px;
+            border-radius: 8px;
+            color: #f8f9fa;
+            overflow-x: auto;
+        }
+        
+        .features-card {
+            background: linear-gradient(145deg, var(--card-bg), var(--secondary-color));
+            border-radius: 12px;
+            padding: 25px;
+            height: 100%;
+            box-shadow: 0 8px 20px rgba(0, 0, 0, 0.25);
+            border: 1px solid rgba(255, 255, 255, 0.05);
+        }
+        
         .features-list {
             list-style-type: none;
             padding-left: 0;
         }
+        
         .features-list li {
-            margin-bottom: 8px;
+            margin-bottom: 15px;
             display: flex;
             align-items: center;
+            padding: 8px 0;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
         }
-        .features-list li::before {
-            content: "📟";
-            margin-right: 10px;
+        
+        .features-list li:last-child {
+            border-bottom: none;
         }
+        
+        .features-list li i {
+            color: var(--primary-color);
+            margin-right: 12px;
+            font-size: 18px;
+        }
+        
         .demo-section {
-            background-color: var(--bs-dark);
-            border-radius: 8px;
-            padding: 20px;
+            background: linear-gradient(145deg, var(--card-bg), var(--secondary-color));
+            border-radius: 12px;
+            padding: 25px;
             margin-top: 30px;
+            box-shadow: 0 8px 20px rgba(0, 0, 0, 0.25);
+            border: 1px solid rgba(255, 255, 255, 0.05);
         }
+        
+        .form-control {
+            background-color: rgba(0, 0, 0, 0.2);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            color: var(--text-color);
+            border-radius: 8px;
+            padding: 12px 15px;
+        }
+        
+        .form-control:focus {
+            background-color: rgba(0, 0, 0, 0.3);
+            border-color: var(--accent-color);
+            color: var(--text-color);
+            box-shadow: 0 0 0 0.25rem rgba(66, 133, 244, 0.25);
+        }
+        
+        .form-check-input {
+            background-color: rgba(0, 0, 0, 0.2);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        
+        .form-check-input:checked {
+            background-color: var(--accent-color);
+            border-color: var(--accent-color);
+        }
+        
+        .btn-primary {
+            background: linear-gradient(45deg, var(--primary-color), var(--accent-color));
+            border: none;
+            border-radius: 8px;
+            padding: 12px 24px;
+            font-weight: 600;
+            transition: transform 0.2s ease, box-shadow 0.3s ease;
+            box-shadow: 0 4px 15px rgba(255, 0, 0, 0.3);
+        }
+        
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(255, 0, 0, 0.4);
+            background: linear-gradient(45deg, #ff3e3e, #4f95ff);
+        }
+        
         .credit {
             text-align: center;
-            margin-top: 2rem;
+            margin-top: 3rem;
             margin-bottom: 2rem;
-            font-size: 0.9rem;
-            opacity: 0.7;
+            padding: 15px;
+            background-color: var(--card-bg);
+            border-radius: 12px;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
+        }
+        
+        .credit a {
+            color: var(--primary-color);
+            text-decoration: none;
+            font-weight: 600;
+            transition: color 0.3s ease;
+        }
+        
+        .credit a:hover {
+            color: var(--accent-color);
+            text-decoration: underline;
+        }
+        
+        /* Animation */
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(20px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        
+        .endpoint, .features-card, .demo-section, .header {
+            animation: fadeIn 0.6s ease-out forwards;
+        }
+        
+        .endpoint:nth-child(2) {
+            animation-delay: 0.2s;
+        }
+        
+        .features-card {
+            animation-delay: 0.3s;
+        }
+        
+        .demo-section {
+            animation-delay: 0.4s;
+        }
+        
+        /* Custom scrollbar */
+        ::-webkit-scrollbar {
+            width: 10px;
+            height: 10px;
+        }
+        
+        ::-webkit-scrollbar-track {
+            background: rgba(0, 0, 0, 0.2);
+            border-radius: 10px;
+        }
+        
+        ::-webkit-scrollbar-thumb {
+            background: rgba(255, 0, 0, 0.5);
+            border-radius: 10px;
+        }
+        
+        ::-webkit-scrollbar-thumb:hover {
+            background: rgba(255, 0, 0, 0.7);
         }
     </style>
 </head>
 <body>
     <div class="container">
         <div class="header">
+            <div class="logo">
+                <i class="fab fa-youtube"></i>
+            </div>
             <h1>YouTube API Service</h1>
-            <p class="lead">Fast, reliable YouTube API with anti-bot protection</p>
-            <div class="badge bg-success">API Version 1.0</div>
+            <p class="lead">Ultra-fast, reliable YouTube API with anti-bot protection</p>
+            <span class="badge-api">API Version 1.0</span>
         </div>
 
         <div class="row">
-            <div class="col-md-8">
-                <h2>API Documentation</h2>
-                <p>This API provides access to YouTube content while avoiding bot detection mechanisms.</p>
+            <div class="col-lg-8">
+                <h2><i class="fas fa-book me-2"></i>API Documentation</h2>
+                <p class="mb-4">This API provides seamless access to YouTube content while avoiding all bot detection mechanisms.</p>
                 
                 <div class="endpoint">
-                    <h3><span class="method get">GET</span> /youtube</h3>
+                    <h3><span class="method get">GET</span>/youtube</h3>
                     <p>Main endpoint to search or get video information</p>
                     <h4>Parameters:</h4>
                     <ul>
                         <li><code>query</code> - YouTube URL, video ID, or search term</li>
                         <li><code>video</code> - Boolean to get video stream (default: false)</li>
-                        <li><code>api_key</code> - Your API key (or use provided demo key)</li>
+                        <li><code>api_key</code> - Your API key (use <code>jaydip</code> or <code>1a873582a7c83342f961cc0a177b2b26</code>)</li>
                     </ul>
                     <div class="example">
-                        <h5>Example:</h5>
-                        <pre>/youtube?query=never+gonna+give+you+up&video=false&api_key=1a873582a7c83342f961cc0a177b2b26</pre>
+                        <h5><i class="fas fa-code me-2"></i>Example:</h5>
+                        <pre>/youtube?query=295&video=false&api_key=jaydip</pre>
                     </div>
                 </div>
                 
                 <div class="endpoint">
-                    <h3><span class="method get">GET</span> /stream/:id</h3>
-                    <p>Stream media from YouTube</p>
-                    <p>This endpoint is used internally by the API to stream media. You should not call it directly.</p>
+                    <h3><span class="method get">GET</span>/stream/:id</h3>
+                    <p>Stream media directly from YouTube</p>
+                    <p><i class="fas fa-info-circle me-2"></i>This endpoint is used internally by the API to stream media. You should not call it directly.</p>
                 </div>
                 
-                <h2>Example Response</h2>
-                <pre class="bg-dark p-3">{
+                <h2 class="mt-5"><i class="fas fa-reply me-2"></i>Example Response</h2>
+                <pre class="response-example p-4">{
   "id": "n_FCrCQ6-bA",
   "title": "295 (Official Audio) | Sidhu Moose Wala | The Kidd | Moosetape",
   "duration": 273,
@@ -603,29 +795,27 @@ def index():
 }</pre>
             </div>
             
-            <div class="col-md-4">
-                <div class="card bg-dark">
-                    <div class="card-body">
-                        <h3 class="card-title">Features</h3>
-                        <ul class="features-list">
-                            <li>Ultra-fast search & play (0.5s response time)</li>
-                            <li>Seamless audio/video streaming</li>
-                            <li>Live stream support</li>
-                            <li>No cookies, no headaches</li>
-                            <li>Play anything — with no limits!</li>
-                        </ul>
-                        
-                        <h4 class="mt-4">Optimized for</h4>
-                        <ul class="features-list">
-                            <li>Pyrogram, Telethon, TGCalls bots</li>
-                            <li>PyTube & YTDl-free engine</li>
-                            <li>Stable performance with 24/7 uptime</li>
-                        </ul>
-                    </div>
+            <div class="col-lg-4">
+                <div class="features-card">
+                    <h3 class="card-title mb-4"><i class="fas fa-bolt me-2"></i>Features</h3>
+                    <ul class="features-list">
+                        <li><i class="fas fa-tachometer-alt"></i>Ultra-fast search & play (0.5s response time)</li>
+                        <li><i class="fas fa-stream"></i>Seamless audio/video streaming</li>
+                        <li><i class="fas fa-broadcast-tower"></i>Live stream support</li>
+                        <li><i class="fas fa-cookie-bite"></i>No cookies, no headaches</li>
+                        <li><i class="fas fa-infinity"></i>Play anything — with no limits!</li>
+                    </ul>
+                    
+                    <h4 class="mt-4 mb-3"><i class="fas fa-cogs me-2"></i>Optimized for</h4>
+                    <ul class="features-list">
+                        <li><i class="fab fa-telegram"></i>Pyrogram, Telethon, TGCalls bots</li>
+                        <li><i class="fas fa-code"></i>PyTube & YTDl-free engine</li>
+                        <li><i class="fas fa-server"></i>24/7 uptime with stable performance</li>
+                    </ul>
                 </div>
                 
-                <div class="demo-section mt-4">
-                    <h3>Try it out</h3>
+                <div class="demo-section">
+                    <h3 class="mb-4"><i class="fas fa-flask me-2"></i>Try it out</h3>
                     <div class="mb-3">
                         <label for="demoUrl" class="form-label">YouTube URL or Search Term:</label>
                         <input type="text" class="form-control" id="demoUrl" placeholder="Enter URL or search term">
@@ -634,24 +824,25 @@ def index():
                         <input type="checkbox" class="form-check-input" id="demoVideo">
                         <label class="form-check-label" for="demoVideo">Get video (instead of audio)</label>
                     </div>
-                    <button type="button" class="btn btn-primary" id="demoButton">Test API</button>
+                    <button type="button" class="btn btn-primary w-100"><i class="fas fa-play me-2"></i>Test API</button>
                     
                     <div class="mt-4" id="resultContainer" style="display: none;">
-                        <h4>Result:</h4>
-                        <pre id="resultPre" class="bg-dark text-light p-3" style="overflow-x: auto;"></pre>
+                        <h4><i class="fas fa-file-code me-2"></i>Result:</h4>
+                        <pre id="resultPre" class="p-3 mt-2" style="overflow-x: auto;"></pre>
                     </div>
                 </div>
             </div>
         </div>
         
         <div class="credit">
-            <p>Developed by <a href="https://t.me/INNOCENT_FUCKER" target="_blank">@INNOCENT_FUCKER</a></p>
+            <p class="mb-0">Developed by <a href="https://t.me/INNOCENT_FUCKER" target="_blank"><i class="fab fa-telegram"></i> @INNOCENT_FUCKER</a></p>
         </div>
     </div>
     
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/js/bootstrap.bundle.min.js"></script>
     <script>
         document.addEventListener('DOMContentLoaded', function() {
-            const demoButton = document.getElementById('demoButton');
+            const demoButton = document.querySelector('.btn-primary');
             const resultContainer = document.getElementById('resultContainer');
             const resultPre = document.getElementById('resultPre');
             
@@ -665,7 +856,11 @@ def index():
                     return;
                 }
                 
-                const apiUrl = `/youtube?query=${encodeURIComponent(url)}&video=${isVideo}&api_key=1a873582a7c83342f961cc0a177b2b26`;
+                // Show loading state
+                demoButton.disabled = true;
+                demoButton.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Loading...';
+                
+                const apiUrl = `/youtube?query=${encodeURIComponent(url)}&video=${isVideo}&api_key=jaydip`;
                 
                 // Make API request
                 fetch(apiUrl)
@@ -673,10 +868,21 @@ def index():
                     .then(data => {
                         resultPre.textContent = JSON.stringify(data, null, 2);
                         resultContainer.style.display = 'block';
+                        
+                        // Restore button state
+                        demoButton.disabled = false;
+                        demoButton.innerHTML = '<i class="fas fa-play me-2"></i>Test API';
+                        
+                        // Scroll to results
+                        resultContainer.scrollIntoView({behavior: 'smooth'});
                     })
                     .catch(error => {
                         resultPre.textContent = 'Error: ' + error;
                         resultContainer.style.display = 'block';
+                        
+                        // Restore button state
+                        demoButton.disabled = false;
+                        demoButton.innerHTML = '<i class="fas fa-play me-2"></i>Test API';
                     });
             });
         });
