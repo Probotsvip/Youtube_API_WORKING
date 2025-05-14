@@ -2,11 +2,11 @@ modules = ["python-3.11"]
 
 [nix]
 channel = "stable-24_05"
-packages = ["openssl", "postgresql"]
+packages = ["openssl", "postgresql", "python311", "python311Packages.pip", "python311Packages.gunicorn"]
 
 [deployment]
 deploymentTarget = "autoscale"
-run = ["gunicorn", "--bind", "0.0.0.0:5000", "main:app"]
+run = ["python3", "-m", "gunicorn", "--bind", "0.0.0.0:5000", "main:app"]
 
 [workflows]
 runButton = "Project"
@@ -26,7 +26,7 @@ author = "agent"
 
 [[workflows.workflow.tasks]]
 task = "shell.exec"
-args = "gunicorn --bind 0.0.0.0:5000 --reuse-port --reload main:app"
+args = "python3 -m pip install -r requirements.txt && python3 -m gunicorn --bind 0.0.0.0:5000 --reuse-port --reload main:app"
 waitForPort = 5000
 
 [[ports]]
