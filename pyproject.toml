@@ -16,4 +16,6 @@ dependencies = [
     "flask-limiter>=3.12",
     "trafilatura>=2.0.0",
     "pymongo>=4.12.1",
+    "flask-login>=0.6.3",
+    "flask-wtf>=1.2.2",
 ]
