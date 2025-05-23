@@ -2523,4 +2523,4 @@ with app.app_context():
 # Run the app if this is the main module
 if __name__ == "__main__":
     # Run Flask app
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)), debug=True)
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5001)), debug=True)
