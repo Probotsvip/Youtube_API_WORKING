@@ -1,3 +1,7 @@
+Flask
+urllib3
+requests
+beautifulsoup4
 email-validator
 flask-cors
 flask
@@ -12,3 +16,13 @@ trafilatura
 pymongo
 flask-login
 flask-wtf
+
+Werkzeug
+click
+itsdangerous
+soupsieve
+MarkupSafe
+jinja
+idna
+charset
+certifi
