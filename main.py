@@ -1653,6 +1653,28 @@ def cached(timeout=CACHE_TIMEOUT):
         return wrapper
     return decorator
 
+
+
+def time_to_seconds(time_str):
+    """Convert time string to seconds"""
+    if not time_str or time_str == "None":
+        return 0
+    try:
+        return sum(int(x) * 60**i for i, x in enumerate(reversed(str(time_str).spdef cookie_txt_file():
+    folder_path = f"{os.getcwd()}/cookies"
+    filename = f"{os.getcwd()}/cookies/logs.csv"
+    txt_files = glob.glob(os.path.join(folder_path, '*.txt'))
+    
+    if not txt_files:
+        raise FileNotFoundError("No .txt files found in the specified folder.")
+    
+    cookie_txt_file = random.choice(txt_files)
+    
+    with open(filename, 'a') as file:
+        file.write(f'Choosen File : {cookie_txt_file}\n')
+    
+    return f"""cookies/{str(cookie_txt_file).split("/")[-1]}"""
+
 def clean_ytdl_options():
     """Generate clean ytdlp options to avoid detection"""
     return {
@@ -1666,6 +1688,7 @@ def clean_ytdl_options():
         "socket_timeout": 15,
         "extract_flat": "in_playlist",
         "user_agent": get_random_user_agent(),
+        "cookiefile": cookie_txt_file(),  # ✅ Cookies support added
         "headers": {
             "Accept-Language": "en-US,en;q=0.9",
             "Sec-Fetch-Mode": "navigate",
@@ -1677,14 +1700,7 @@ def clean_ytdl_options():
             "Sec-Fetch-Mode": "navigate",
             "Referer": "https://www.google.com/"
         }
-    }
-
-def time_to_seconds(time_str):
-    """Convert time string to seconds"""
-    if not time_str or time_str == "None":
-        return 0
-    try:
-        return sum(int(x) * 60**i for i, x in enumerate(reversed(str(time_str).split(":"))))
+                    }lit(":"))))
     except:
         return 0
 
