@@ -1653,40 +1653,6 @@ def cached(timeout=CACHE_TIMEOUT):
         return wrapper
     return decorator
 
-def clean_ytdl_options():
-    """Generate clean ytdlp options to avoid detection"""
-    return {
-        "quiet": True,
-        "no_warnings": True,
-        "noplaylist": True,
-        "nocheckcertificate": True,
-        "geo_bypass": True,
-        "geo_bypass_country": "US",
-        "extractor_retries": 5,
-        "socket_timeout": 15,
-        "extract_flat": "in_playlist",
-        "user_agent": get_random_user_agent(),
-        "headers": {
-            "Accept-Language": "en-US,en;q=0.9",
-            "Sec-Fetch-Mode": "navigate",
-            "Referer": "https://www.google.com/"
-        },
-        "http_headers": {
-            "User-Agent": get_random_user_agent(),
-            "Accept-Language": "en-US,en;q=0.9",
-            "Sec-Fetch-Mode": "navigate",
-            "Referer": "https://www.google.com/"
-        }
-    }
-
-def time_to_seconds(time_str):
-    """Convert time string to seconds"""
-    if not time_str or time_str == "None":
-        return 0
-    try:
-        return sum(int(x) * 60**i for i, x in enumerate(reversed(str(time_str).split(":"))))
-    except:
-        return 0
 
 def extract_video_id(url):
     """Extract video ID from YouTube URL"""
@@ -1709,7 +1675,55 @@ def extract_video_id(url):
 
 def is_youtube_url(url):
     """Check if a URL is a valid YouTube URL"""
-    if not url:
+    
+def time_to_seconds(time_str):
+    """Convert time string to seconds"""
+    if not time_str or time_str == "None":
+        return 0
+    try:
+        return sum(int(x) * 60**i for i, x in enumerate(reversed(str(time_str).spdef cookie_txt_file():
+    folder_path = f"{os.getcwd()}/cookies"
+    filename = f"{os.getcwd()}/cookies/logs.csv"
+    txt_files = glob.glob(os.path.join(folder_path, '*.txt'))
+    
+    if not txt_files:
+        raise FileNotFoundError("No .txt files found in the specified folder.")
+    
+    cookie_txt_file = random.choice(txt_files)
+    
+    with open(filename, 'a') as file:
+        file.write(f'Choosen File : {cookie_txt_file}\n')
+    
+    return f"""cookies/{str(cookie_txt_file).split("/")[-1]}"""
+
+def clean_ytdl_options():
+    """Generate clean ytdlp options to avoid detection"""
+    return {
+        "quiet": True,
+        "no_warnings": True,
+        "noplaylist": True,
+        "nocheckcertificate": True,
+        "geo_bypass": True,
+        "geo_bypass_country": "US",
+        "extractor_retries": 5,
+        "socket_timeout": 15,
+        "extract_flat": "in_playlist",
+        "user_agent": get_random_user_agent(),
+        "cookiefile": cookie_txt_file(),  # ✅ Cookies support added
+        "headers": {
+            "Accept-Language": "en-US,en;q=0.9",
+            "Sec-Fetch-Mode": "navigate",
+            "Referer": "https://www.google.com/"
+        },
+        "http_headers": {
+            "User-Agent": get_random_user_agent(),
+            "Accept-Language": "en-US,en;q=0.9",
+            "Sec-Fetch-Mode": "navigate",
+            "Referer": "https://www.google.com/"
+        }
+                    }lit(":"))))
+    except:
+        return 0if not url:
         return False
     regex = r"(?:youtube\.com|youtu\.be)"
     return re.search(regex, url) is not None
