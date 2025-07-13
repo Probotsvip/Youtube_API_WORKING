@@ -5,6 +5,7 @@ fastapi
 flask
 flask-pymongo
 flask-sqlalchemy
+Flask-Limiter
 flask-cors
 fp
 free-proxy
