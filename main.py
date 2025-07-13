@@ -1640,24 +1640,17 @@ def cached(timeout=CACHE_TIMEOUT):
             cached_result = cache.get(cache_key)
             if cached_result:
                 cached_time, result = cached_result
-                if time.time() - cached_time < timeout:
-                    return result
-            
-            # Call the function
-            result = func(*args, **kwargs)
-            
-            # Store in cache
-            cache[cache_key] = (time.time(), result)
-            
-            return result
-        return wrapper
-    return decorator
-def time_to_seconds(time_str):
+              def time_to_seconds(time_str):
     """Convert time string to seconds"""
     if not time_str or time_str == "None":
         return 0
     try:
-        return sum(int(x) * 60**i for i, x in enumerate(reversed(str(time_str).spdef cookie_txt_file():
+        return sum(int(x) * 60**i for i, x in enumerate(reversed(str(time_str).split(":"))))
+    except:
+        return 0
+
+def cookie_txt_file():
+    """Select a random cookie .txt file and log it"""
     folder_path = f"{os.getcwd()}/cookies"
     filename = f"{os.getcwd()}/cookies/logs.csv"
     txt_files = glob.glob(os.path.join(folder_path, '*.txt'))
@@ -1665,12 +1658,12 @@ def time_to_seconds(time_str):
     if not txt_files:
         raise FileNotFoundError("No .txt files found in the specified folder.")
     
-    cookie_txt_file = random.choice(txt_files)
+    cookie_txt = random.choice(txt_files)
     
     with open(filename, 'a') as file:
-        file.write(f'Choosen File : {cookie_txt_file}\n')
+        file.write(f'Chosen File : {cookie_txt}\n')
     
-    return f"""cookies/{str(cookie_txt_file).split("/")[-1]}"""
+    return f"cookies/{os.path.basename(cookie_txt)}"
 
 def clean_ytdl_options():
     """Generate clean ytdlp options to avoid detection"""
@@ -1697,7 +1690,19 @@ def clean_ytdl_options():
             "Sec-Fetch-Mode": "navigate",
             "Referer": "https://www.google.com/"
         }
-                    }lit(":"))))
+    }
+    if time.time() - cached_time < timeout:
+                    return result
+            
+            # Call the function
+            result = func(*args, **kwargs)
+            
+            # Store in cache
+            cache[cache_key] = (time.time(), result)
+            
+            return result
+        return wrapper
+    return decorator
     except:
         return 0
             
