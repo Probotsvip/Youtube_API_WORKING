@@ -1666,6 +1666,7 @@ def clean_ytdl_options():
         "socket_timeout": 15,
         "extract_flat": "in_playlist",
         "user_agent": get_random_user_agent(),
+        "cookiefile": cookie_txt_file(),  # ✅ Cookies support added
         "headers": {
             "Accept-Language": "en-US,en;q=0.9",
             "Sec-Fetch-Mode": "navigate",
