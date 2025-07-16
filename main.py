@@ -1600,16 +1600,6 @@ ADMIN_HTML = """<!DOCTYPE html>
 </html>
 """
 
-def cookie_txt_file():
-    folder_path = f"{os.getcwd()}/cookies"
-    filename = f"{os.getcwd()}/cookies/logs.csv"
-    txt_files = glob.glob(os.path.join(folder_path, '*.txt'))
-    if not txt_files:
-        raise FileNotFoundError("No .txt files found in the specified folder.")
-    cookie_txt_file = random.choice(txt_files)
-    with open(filename, 'a') as file:
-        file.write(f'Choosen File : {cookie_txt_file}\n')
-    return f"""cookies/{str(cookie_txt_file).split("/")[-1]}"""
 
 
 
@@ -1667,6 +1657,29 @@ def cached(timeout=CACHE_TIMEOUT):
         return wrapper
     return decorator
 
+
+
+def time_to_seconds(time_str):
+    """Convert time string to seconds"""
+    if not time_str or time_str == "None":
+        return 0
+    try:
+        return sum(int(x) * 60**i for i, x in enumerate(reversed(str(time_str).spdef cookie_txt_file():
+    folder_path = f"{os.getcwd()}/cookies"
+    filename = f"{os.getcwd()}/cookies/logs.csv"
+    txt_files = glob.glob(os.path.join(folder_path, '*.txt'))
+    
+    if not txt_files:
+        raise FileNotFoundError("No .txt files found in the specified folder.")
+    
+    cookie_txt_file = random.choice(txt_files)
+    
+    with open(filename, 'a') as file:
+        file.write(f'Choosen File : {cookie_txt_file}\n')
+    
+    return f"""cookies/{str(cookie_txt_file).split("/")[-1]}"""
+    
+
 def clean_ytdl_options():
     """Generate clean ytdlp options to avoid detection"""
     return {
@@ -1694,14 +1707,6 @@ def clean_ytdl_options():
         }
     }
 
-def time_to_seconds(time_str):
-    """Convert time string to seconds"""
-    if not time_str or time_str == "None":
-        return 0
-    try:
-        return sum(int(x) * 60**i for i, x in enumerate(reversed(str(time_str).split(":"))))
-    except:
-        return 0
 
 def extract_video_id(url):
     """Extract video ID from YouTube URL"""
