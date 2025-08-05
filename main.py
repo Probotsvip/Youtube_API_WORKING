@@ -1677,7 +1677,7 @@ def clean_ytdl_options():
             "Sec-Fetch-Mode": "navigate",
             "Referer": "https://www.google.com/"
         }
-    }-
+    }
 
 def time_to_seconds(time_str):
     """Convert time string to seconds"""
